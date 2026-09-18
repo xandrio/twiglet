@@ -3,19 +3,20 @@ export function createStyle(enabled: boolean) {
   const wrap = (open: number, close: number) => (text: string) =>
     enabled && text ? `\x1b[${open}m${text}\x1b[${close}m` : text;
   const bold = wrap(1, 22);
-  const cyan = wrap(36, 39);
+  const blue = wrap(34, 39);
+  const green = wrap(32, 39);
   return {
     heading: bold,
-    branch: (text: string) => bold(cyan(text)),
-    ref: cyan,
+    branch: (text: string) => bold(green(text)),
+    ref: blue,
     subject: bold,
-    author: wrap(35, 39),
-    hash: wrap(33, 39),
+    author: green,
+    hash: wrap(2, 22),
     muted: wrap(2, 22),
     good: wrap(32, 39),
     warning: wrap(33, 39),
     error: wrap(31, 39),
-    selection: (text: string) => bold(cyan(text)),
+    selection: (text: string) => bold(blue(text)),
   };
 }
 

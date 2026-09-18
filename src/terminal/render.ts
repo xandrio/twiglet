@@ -32,7 +32,7 @@ export function renderUpstream(upstream: Upstream, style: Style = plain): string
       : `Ahead: ${style.heading(String(upstream.ahead))} commits   Behind: ${style.heading(String(upstream.behind))} commits`);
   } else lines.push(style.warning(`Comparison unavailable: ${safeText(upstream.message)}`));
   if (target?.source === 'remote-tracking') {
-    lines.push('Remote-tracking information is local. Remote freshness unknown; no fetch performed.');
+    lines.push(style.muted('Remote-tracking information is local. Remote freshness unknown; no fetch performed.'));
   }
   return lines;
 }
@@ -44,7 +44,7 @@ export function renderOverview(overview: Overview, style: Style = plain): string
     ...renderUpstream(overview.upstream, style),
   ];
   if (overview.shallow) lines.push(style.warning('History: shallow clone; history is incomplete.'));
-  if (overview.filtersDisabled) lines.push(style.warning('External clean filters disabled; filtered paths may appear modified.'));
+  if (overview.filtersDisabled) lines.push(style.muted('External clean filters disabled; filtered paths may appear modified.'));
   lines.push('');
   const groups: [string, Change[]][] = [
     ['Conflicts', changes.filter((c) => c.kind === 'conflict')],
@@ -70,7 +70,7 @@ export function renderOverview(overview: Overview, style: Style = plain): string
 
 export function renderCommit(commit: CommitSummary, style: Style = plain): string[] {
   return [`${style.hash(commit.oid.slice(0, 12))} ${style.subject(safeText(commit.subject) || '(no subject)')}`,
-    `  ${style.author(safeText(commit.author))} | ${style.muted(safeText(commit.committedAt))}${commit.parents.length > 1 ? ' | merge' : ''}`];
+    `  ${style.author(safeText(commit.author))} | ${style.muted(safeText(commit.committedAt))}${commit.parents.length > 1 ? style.muted(' | merge') : ''}`];
 }
 
 export function renderHistory(history: RecentCommits, style: Style = plain): string {

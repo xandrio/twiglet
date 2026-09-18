@@ -12,7 +12,7 @@ function trackingLabel(branch: LocalBranch, style: Style): string {
 
 export function branchChoice(branch: LocalBranch, style: Style = plain): string {
   const subject = safeText(branch.tip?.subject ?? 'No commits yet');
-  return `${branch.current ? style.good('* ') : ''}${style.branch(safeText(branch.name))} | ${style.muted(safeText(branch.tip?.committedAt.slice(0, 10) ?? 'unborn'))} | ${style.subject(subject.length > 50 ? subject.slice(0, 47) + '...' : subject)} | ${trackingLabel(branch, style)}`;
+  return `${branch.current ? style.good('* ') : ''}${(branch.current ? style.branch : style.ref)(safeText(branch.name))} | ${style.muted(safeText(branch.tip?.committedAt.slice(0, 10) ?? 'unborn'))} | ${style.subject(subject.length > 50 ? subject.slice(0, 47) + '...' : subject)} | ${trackingLabel(branch, style)}`;
 }
 
 export function renderBranchContext(list: BranchList, style: Style = plain): string {
@@ -25,8 +25,8 @@ export function renderBranches(list: BranchList, style: Style = plain): string {
 
 export function renderBranchDetails(details: BranchDetails, style: Style = plain): string {
   const { branch, history } = details;
-  const lines = [style.heading('Branch details'), `Location: ${safeText(details.root)}`, `Branch: ${style.branch(safeText(branch.name))}${branch.current ? ' (current in this worktree)' : ''}`,
-    'Inspection only; no branch is checked out and no working-tree status is shown.'];
+  const lines = [style.heading('Branch details'), `Location: ${safeText(details.root)}`, `Branch: ${(branch.current ? style.branch : style.ref)(safeText(branch.name))}${branch.current ? ' (current in this worktree)' : ''}`,
+    style.muted('Inspection only; no branch is checked out and no working-tree status is shown.')];
   if (branch.tip) lines.push(`Tip: ${style.hash(branch.tip.oid)}`, `Subject: ${style.subject(safeText(branch.tip.subject))}`, `Author: ${style.author(safeText(branch.tip.author))}`, `Tip commit date: ${style.muted(safeText(branch.tip.committedAt))}`);
   else lines.push('No commits yet.');
   lines.push(...renderUpstream(details.upstream, style), '', style.heading('Recent commits reachable from this branch, including merges:'));

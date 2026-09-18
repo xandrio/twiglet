@@ -2026,19 +2026,20 @@ async function readBranchDetails(directory, name, signal, run = runGit) {
 function createStyle(enabled) {
   const wrap = (open, close) => (text) => enabled && text ? `\x1B[${open}m${text}\x1B[${close}m` : text;
   const bold = wrap(1, 22);
-  const cyan = wrap(36, 39);
+  const blue = wrap(34, 39);
+  const green = wrap(32, 39);
   return {
     heading: bold,
-    branch: (text) => bold(cyan(text)),
-    ref: cyan,
+    branch: (text) => bold(green(text)),
+    ref: blue,
     subject: bold,
-    author: wrap(35, 39),
-    hash: wrap(33, 39),
+    author: green,
+    hash: wrap(2, 22),
     muted: wrap(2, 22),
     good: wrap(32, 39),
     warning: wrap(33, 39),
     error: wrap(31, 39),
-    selection: (text) => bold(cyan(text))
+    selection: (text) => bold(blue(text))
   };
 }
 var plain = createStyle(false);
@@ -2070,7 +2071,7 @@ function renderUpstream(upstream, style = plain) {
     lines.push(upstream.ahead === 0 && upstream.behind === 0 ? style.good("Matches the local upstream reference.") : `Ahead: ${style.heading(String(upstream.ahead))} commits   Behind: ${style.heading(String(upstream.behind))} commits`);
   } else lines.push(style.warning(`Comparison unavailable: ${safeText(upstream.message)}`));
   if (target?.source === "remote-tracking") {
-    lines.push("Remote-tracking information is local. Remote freshness unknown; no fetch performed.");
+    lines.push(style.muted("Remote-tracking information is local. Remote freshness unknown; no fetch performed."));
   }
   return lines;
 }
@@ -2083,7 +2084,7 @@ function renderOverview(overview, style = plain) {
     ...renderUpstream(overview.upstream, style)
   ];
   if (overview.shallow) lines.push(style.warning("History: shallow clone; history is incomplete."));
-  if (overview.filtersDisabled) lines.push(style.warning("External clean filters disabled; filtered paths may appear modified."));
+  if (overview.filtersDisabled) lines.push(style.muted("External clean filters disabled; filtered paths may appear modified."));
   lines.push("");
   const groups = [
     ["Conflicts", changes.filter((c) => c.kind === "conflict")],
@@ -2112,7 +2113,7 @@ function renderOverview(overview, style = plain) {
 function renderCommit(commit, style = plain) {
   return [
     `${style.hash(commit.oid.slice(0, 12))} ${style.subject(safeText(commit.subject) || "(no subject)")}`,
-    `  ${style.author(safeText(commit.author))} | ${style.muted(safeText(commit.committedAt))}${commit.parents.length > 1 ? " | merge" : ""}`
+    `  ${style.author(safeText(commit.author))} | ${style.muted(safeText(commit.committedAt))}${commit.parents.length > 1 ? style.muted(" | merge") : ""}`
   ];
 }
 function renderHistory(history, style = plain) {
@@ -2142,7 +2143,7 @@ function trackingLabel(branch, style) {
 }
 function branchChoice(branch, style = plain) {
   const subject = safeText(branch.tip?.subject ?? "No commits yet");
-  return `${branch.current ? style.good("* ") : ""}${style.branch(safeText(branch.name))} | ${style.muted(safeText(branch.tip?.committedAt.slice(0, 10) ?? "unborn"))} | ${style.subject(subject.length > 50 ? subject.slice(0, 47) + "..." : subject)} | ${trackingLabel(branch, style)}`;
+  return `${branch.current ? style.good("* ") : ""}${(branch.current ? style.branch : style.ref)(safeText(branch.name))} | ${style.muted(safeText(branch.tip?.committedAt.slice(0, 10) ?? "unborn"))} | ${style.subject(subject.length > 50 ? subject.slice(0, 47) + "..." : subject)} | ${trackingLabel(branch, style)}`;
 }
 function renderBranchContext(list, style = plain) {
   return `${style.heading("Local branches")}
@@ -2160,8 +2161,8 @@ function renderBranchDetails(details, style = plain) {
   const lines = [
     style.heading("Branch details"),
     `Location: ${safeText(details.root)}`,
-    `Branch: ${style.branch(safeText(branch.name))}${branch.current ? " (current in this worktree)" : ""}`,
-    "Inspection only; no branch is checked out and no working-tree status is shown."
+    `Branch: ${(branch.current ? style.branch : style.ref)(safeText(branch.name))}${branch.current ? " (current in this worktree)" : ""}`,
+    style.muted("Inspection only; no branch is checked out and no working-tree status is shown.")
   ];
   if (branch.tip) lines.push(`Tip: ${style.hash(branch.tip.oid)}`, `Subject: ${style.subject(safeText(branch.tip.subject))}`, `Author: ${style.author(safeText(branch.tip.author))}`, `Tip commit date: ${style.muted(safeText(branch.tip.committedAt))}`);
   else lines.push("No commits yet.");
