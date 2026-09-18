@@ -1,8 +1,23 @@
+import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, realpath, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import type { TestContext } from 'node:test';
+
+/** Compare directory identity, not spelling (symlinks, Windows short names, separators). */
+export async function assertSameDirectory(actual: string, expected: string): Promise<void> {
+  assert(path.isAbsolute(actual), `Expected an absolute repository location, got ${actual}`);
+  assert((await stat(actual)).isDirectory(), `Repository location is not a directory: ${actual}`);
+  assert.equal(await realpath(actual), await realpath(expected));
+}
+
+/** Windows junctions need no symlink privilege; both exercise physical-path discovery. */
+export async function directoryAlias(t: TestContext, target: string): Promise<string> {
+  const alias = path.join(await temp(t), 'repository alias é');
+  await symlink(target, alias, process.platform === 'win32' ? 'junction' : 'dir');
+  return alias;
+}
 
 export async function temp(t: TestContext): Promise<string> {
   const directory = await mkdtemp(path.join(os.tmpdir(), 'twiglet-test-'));

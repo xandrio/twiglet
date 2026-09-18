@@ -4,13 +4,19 @@ import { cp, mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
-import { fixtureGit, repository, temp } from './helpers.js';
+import { assertSameDirectory, directoryAlias, fixtureGit, repository, temp } from './helpers.js';
 
 const project = fileURLToPath(new URL('../', import.meta.url));
 function invoke(entry: string, cwd: string, args: string[] = [], env = process.env, preload?: string) {
   return spawnSync(process.execPath, [...(preload ? ['--require', preload] : []), entry, ...args], {
     cwd, env, encoding: 'utf8', timeout: 10_000, windowsHide: true,
   });
+}
+
+async function assertLocation(output: string, expected: string): Promise<void> {
+  const locations = output.split(/\r?\n/).filter((line) => line.startsWith('Location: '));
+  assert.equal(locations.length, 1, `Expected exactly one Location line in:\n${output}`);
+  await assertSameDirectory(locations[0]!.slice('Location: '.length), expected);
 }
 
 test('candidate checkout can be cloned and run without install, build, or node_modules', async (t) => {
@@ -29,23 +35,29 @@ test('candidate checkout can be cloned and run without install, build, or node_m
   await assert.rejects(stat(path.join(checkout, 'node_modules')), { code: 'ENOENT' });
   const before = fixtureGit(checkout, 'status', '--porcelain');
   const entry = path.join(checkout, 'dist', 'twiglet.cjs');
-  const other = await repository(t);
-  const direct = invoke(entry, other);
+  const other = await directoryAlias(t, await repository(t));
+  const nested = path.join(other, 'nested');
+  await mkdir(nested);
+  const direct = invoke(entry, nested);
   assert.equal(direct.status, 0, direct.stderr);
   assert.match(direct.stdout, /Repository overview/);
   assert.match(direct.stdout, /HEAD: topic/);
-  assert(direct.stdout.includes(other.replaceAll('\\', '/')) || direct.stdout.includes(other));
+  await assertLocation(direct.stdout, other);
   assert(!direct.stdout.includes('\x1b'));
-  assert.equal(invoke(entry, checkout, ['status']).status, 0);
-  assert.equal(invoke(entry, directory, ['--repo', other, 'status']).status, 0);
+  const own = invoke(entry, checkout, ['status']);
+  assert.equal(own.status, 0, own.stderr);
+  await assertLocation(own.stdout, checkout);
+  const explicit = invoke(entry, directory, ['--repo', nested, 'status']);
+  assert.equal(explicit.status, 0, explicit.stderr);
+  await assertLocation(explicit.stdout, other);
   assert.match(invoke(entry, directory, ['--help']).stdout, /Usage: tl/);
   assert.equal(invoke(entry, directory, ['--version']).stdout.trim(), '0.1.0');
   assert.equal(invoke(entry, directory, ['--repo']).status, 1);
   assert.equal(invoke(entry, directory, ['--unknown']).status, 1);
   assert.match(invoke(entry, directory).stderr, /not a git repository/i);
-  const injected = invoke(entry, other, [], { ...process.env, GIT_DIR: path.join(checkout, '.git'), GIT_WORK_TREE: checkout });
+  const injected = invoke(entry, nested, [], { ...process.env, GIT_DIR: path.join(checkout, '.git'), GIT_WORK_TREE: checkout });
   assert.equal(injected.status, 0, injected.stderr);
-  assert(injected.stdout.includes(other.replaceAll('\\', '/')) || injected.stdout.includes(other));
+  await assertLocation(injected.stdout, other);
   const noGit = Object.fromEntries(Object.entries(process.env).filter(([key]) => key.toUpperCase() !== 'PATH'));
   noGit.PATH = directory;
   const missing = invoke(entry, other, [], noGit);

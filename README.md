@@ -75,7 +75,10 @@ Interactive inspection errors stay in the session so you can go Back and Exit.
 The overview shows repository location, attached/unborn/detached HEAD, configured
 upstream, and grouped staged, unstaged, conflict, and untracked entries. It works
 from nested directories and linked worktrees. It does not fetch or calculate
-ahead/behind counts yet. Untracked directories are grouped and each change group
+ahead/behind counts yet. Location is the absolute worktree root reported by Git,
+not the invocation directory or its original spelling. Symlinks and Windows short
+directory names may resolve to a different spelling of the same physical directory.
+Untracked directories are grouped and each change group
 shows at most 30 entries; a path can be both staged and unstaged.
 
 Inspection disables optional index writes, filesystem-monitor helpers, and external

@@ -5,7 +5,7 @@ import path from 'node:path';
 import test from 'node:test';
 import { readOverview } from '../src/core/repository.js';
 import { runGit } from '../src/git/run.js';
-import { fixtureGit, repository, temp } from './helpers.js';
+import { assertSameDirectory, directoryAlias, fixtureGit, repository, temp } from './helpers.js';
 
 async function snapshot(root: string, prefix = ''): Promise<Record<string, string>> {
   const files: Record<string, string> = {};
@@ -22,7 +22,23 @@ test('real Git: clean repository, nested directory, and no content mutations', a
   await mkdir(path.join(root, 'nested'));
   const before = await snapshot(root);
   const result = await readOverview(path.join(root, 'nested'));
-  assert.equal(path.normalize(result.root), path.normalize(root));
+  await assertSameDirectory(result.root, root);
+  assert.equal(result.head.kind, 'branch');
+  assert.deepEqual(result.changes, []);
+  assert.deepEqual(await snapshot(root), before);
+});
+test('discovers the worktree root through an alias and nested directory', async (t) => {
+  const root = await repository(t);
+  const alias = await directoryAlias(t, root);
+  const nested = path.join(alias, 'nested');
+  await mkdir(nested);
+  const before = await snapshot(root);
+  const result = await readOverview(nested);
+  await assertSameDirectory(result.root, alias);
+  await assertSameDirectory(result.root, root);
+  // A real but incorrect directory (such as cwd or .git) must still fail.
+  await assert.rejects(assertSameDirectory(result.root, nested), { name: 'AssertionError' });
+  await assert.rejects(assertSameDirectory(result.root, path.join(root, '.git')), { name: 'AssertionError' });
   assert.equal(result.head.kind, 'branch');
   assert.deepEqual(result.changes, []);
   assert.deepEqual(await snapshot(root), before);
@@ -70,6 +86,7 @@ test('real Git: linked worktree and local upstream configuration', async (t) => 
   fixtureGit(root, 'worktree', 'add', '-b', 'linked', linked, 'topic');
   fixtureGit(linked, 'branch', '--set-upstream-to=topic');
   const result = await readOverview(linked);
+  await assertSameDirectory(result.root, linked);
   assert.equal(result.upstream, 'topic');
   assert.equal(result.head.kind === 'branch' && result.head.name, 'linked');
 });
