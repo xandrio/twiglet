@@ -18,8 +18,9 @@ closed specification.
   parsing in `src/git`, and interactive navigation/rendering in `src/terminal`.
   `src/cli.ts` owns arguments and process-level behavior. Core code must not prompt,
   print, change global working directories, or exit the process.
-- The primary experience is `tl` -> Repository overview or Recent commits, with
-  Refresh/Back navigation. Direct `status` and `log --limit N` share core operations.
+- The primary experience is `tl` -> Repository overview, Recent commits, or Local
+  branches, with Refresh/Back navigation. Direct `status`, `log --limit N`,
+  `branches`, and `branch <name>` share core operations.
 - Call Git with argument arrays, never shell commands. Inspection must neither
   mutate repositories nor contact remotes. Account for optional index writes,
   partial-clone lazy fetching, external helpers, and inherited Git environment.
@@ -54,6 +55,18 @@ unborn HEAD, races, and operational errors. Never replace unavailable counts wit
 or imply remote freshness. Local-branch upstreams need no remote-freshness claim.
 History must not scan the worktree or calculate divergence. Refresh reads local
 state only. No network access, watch service, pagination, graph, or desktop scope.
+
+Milestone 3 adds local branch exploration. Enumerate branch summaries in bulk;
+never calculate divergence or traverse history for every selector row. Tip dates
+are commit dates, not last branch usage. Use full refs as selector identities and
+exact local branch names for direct lookup (no revision expressions). A selected
+branch is not necessarily HEAD: capture its tip, reuse history/upstream primitives,
+and verify that selected ref has not moved or disappeared before displaying details.
+Never check out a branch or attribute the current worktree's changes to it.
+Branch details retain useful metadata when history or comparison is unavailable;
+fatal lookup/ref-change failures exit 1. Current means current in this worktree;
+other worktree usage is not inferred. Remote branches, arbitrary comparisons,
+graphs, branch mutations, and search/filter UI remain outside this milestone.
 
 ## Collaboration and decisions
 

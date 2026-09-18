@@ -14,7 +14,7 @@ export function parseDivergence(data: Buffer): { ahead: number; behind: number }
 }
 
 /** An optional comparison failure must not discard the primary overview. */
-export async function readUpstream(cwd: string, head: Head, shallow: boolean, signal?: AbortSignal, run: GitRunner = runGit): Promise<Upstream> {
+export async function readUpstream(cwd: string, head: Head, shallow: boolean, signal?: AbortSignal, run: GitRunner = runGit, verifyHead = true): Promise<Upstream> {
   let target: UpstreamTarget | undefined;
   let configured: string | undefined;
   const unavailable = (reason: Extract<Upstream, { kind: 'unavailable' }>['reason'], message: string): Upstream => ({
@@ -57,7 +57,7 @@ export async function readUpstream(cwd: string, head: Head, shallow: boolean, si
   };
   try {
     const result = await inspect();
-    if (!sameHead(head, await readHead(cwd, signal, run))) return unavailable('changed-head', 'HEAD changed during inspection. Refresh to compare the current HEAD.');
+    if (verifyHead && !sameHead(head, await readHead(cwd, signal, run))) return unavailable('changed-head', 'HEAD changed during inspection. Refresh to compare the current HEAD.');
     return result;
   } catch (error) {
     if (signal?.aborted) throw error;

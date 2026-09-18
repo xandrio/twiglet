@@ -51,10 +51,20 @@ test('candidate checkout can be cloned and run without install, build, or node_m
   assert.equal(explicit.status, 0, explicit.stderr);
   await assertLocation(explicit.stdout, other);
   assert.match(invoke(entry, directory, ['--help']).stdout, /Usage: tl/);
-  assert.equal(invoke(entry, directory, ['--version']).stdout.trim(), '0.2.0');
+  assert.equal(invoke(entry, directory, ['--version']).stdout.trim(), '0.3.0');
   const history = invoke(entry, directory, ['--repo', nested, 'log', '--limit', '1']);
   assert.equal(history.status, 0, history.stderr);
   assert.match(history.stdout, /Initial/);
+  const branches = invoke(entry, nested, ['branches']);
+  assert.equal(branches.status, 0, branches.stderr);
+  assert.match(branches.stdout, /\* topic/);
+  const branch = invoke(entry, nested, ['branch', 'topic']);
+  assert.equal(branch.status, 0, branch.stderr);
+  assert.match(branch.stdout, /Branch: topic/);
+  assert.match(branch.stdout, /Initial/);
+  for (const args of [['branch'], ['branch', 'HEAD~1'], ['branch', 'missing'], ['branches', '--limit', '2']]) {
+    assert.equal(invoke(entry, nested, args).status, 1);
+  }
   await assertLocation(history.stdout, other);
   for (const args of [['log', '--limit', '0'], ['log', '--limit', '101'], ['log', '--limit', '1.5'], ['status', '--limit', '2']]) {
     assert.equal(invoke(entry, other, args).status, 1);
@@ -70,6 +80,10 @@ test('candidate checkout can be cloned and run without install, build, or node_m
   assert.match(partial.stdout, /HEAD: topic/);
   assert.match(partial.stdout, /Working tree: clean/);
   assert.match(partial.stdout, /unavailable/i);
+  const partialBranch = invoke(entry, other, ['branch', 'topic']);
+  assert.equal(partialBranch.status, 0, partialBranch.stderr);
+  assert.match(partialBranch.stdout, /Comparison unavailable/);
+  assert.match(partialBranch.stdout, /Initial/);
   assert.equal(invoke(entry, directory, ['--repo']).status, 1);
   assert.equal(invoke(entry, directory, ['--unknown']).status, 1);
   assert.match(invoke(entry, directory).stderr, /not a git repository/i);
@@ -85,7 +99,7 @@ test('candidate checkout can be cloned and run without install, build, or node_m
 });
 
 // Terminal-like streams exercise the bundled prompt library, not native OS PTYs.
-test('bundled prompts refresh both views, navigate Back/Exit and restore raw mode', async (t) => {
+test('bundled prompts refresh overview, history and branches, navigate Back/Exit and restore raw mode', async (t) => {
   const directory = await temp(t);
   const entry = path.join(directory, 'twiglet.cjs');
   await cp(path.join(project, 'dist', 'twiglet.cjs'), entry);
@@ -126,6 +140,21 @@ process.stdout.write = function(chunk, ...args) {
   } else if (phase === 6 && text.includes('Twiglet')) {
     phase = 7;
     setTimeout(() => input.write('\x1b[B\r'), 30);
+  } else if (phase === 7 && text.includes('? Local branches')) {
+    phase = 8;
+    setTimeout(() => input.write('\r'), 30);
+  } else if (phase === 8 && text.includes('Navigation')) {
+    phase = 9;
+    setTimeout(() => input.write('\x1b[B\r'), 30);
+  } else if (phase === 9 && text.includes('Navigation')) {
+    phase = 10;
+    setTimeout(() => input.write('\r'), 30);
+  } else if (phase === 10 && text.includes('? Local branches')) {
+    phase = 11;
+    setTimeout(() => input.write('\x1b[A\x1b[A\r'), 30);
+  } else if (phase === 11 && text.includes('Twiglet')) {
+    phase = 12;
+    setTimeout(() => input.write('\x1b[B\r'), 30);
   }
   return original(chunk, ...args);
 };
@@ -137,7 +166,7 @@ process.on('exit', () => {
     const result = invoke(entry, repo, [], { ...process.env, TERM: 'xterm', NO_COLOR: '1' }, preload);
     assert.equal(result.status, cancel ? 130 : 0, result.stderr + result.stdout);
     assert(!result.stderr.includes('RAW MODE LEAK'));
-    if (!cancel) { assert.match(result.stdout, /Location:/); assert.match(result.stdout, /Initial/); assert.match(result.stdout, /Navigation/); }
+    if (!cancel) { assert.match(result.stdout, /Location:/); assert.match(result.stdout, /Initial/); assert.match(result.stdout, /Branch details/); }
   }
 });
 

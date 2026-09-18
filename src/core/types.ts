@@ -49,6 +49,29 @@ export interface RecentCommits {
   limit: number;
 }
 
+export type Tracking =
+  | { kind: 'none' }
+  | { kind: 'configured'; target: UpstreamTarget; available: boolean }
+  | { kind: 'unavailable'; message: string };
+
+export interface LocalBranch {
+  ref: string;
+  name: string;
+  current: boolean;
+  tip: CommitSummary | null;
+  tracking: Tracking;
+}
+
+export interface BranchList { root: string; head: Head; branches: LocalBranch[] }
+export interface BranchDetails {
+  root: string;
+  branch: LocalBranch;
+  shallow: boolean;
+  upstream: Upstream;
+  history: { kind: 'available'; commits: CommitSummary[]; hasMore: boolean }
+    | { kind: 'unavailable'; message: string };
+}
+
 export class RepositoryError extends Error {
   constructor(message: string, options?: ErrorOptions) {
     super(message, options);

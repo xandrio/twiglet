@@ -5,8 +5,8 @@ first focus is a terminal/CLI experience that makes everyday repository informat
 quick to understand.
 
 This is an early-stage personal project intended to be open source. `tl` opens an
-interactive menu for repository overview and recent commits, with local upstream
-divergence in the overview. Each view offers Refresh and Back.
+interactive menu for repository overview, recent commits, and local branch
+exploration, with locally known upstream divergence. Views offer Refresh and Back.
 
 ## Technical direction
 
@@ -38,7 +38,8 @@ From the repository you want to inspect, run:
 node /path/to/twiglet/dist/twiglet.cjs
 ```
 
-Use the arrow keys and Enter to select **Repository overview** or **Recent commits**.
+Use the arrow keys and Enter to select **Repository overview**, **Recent commits**,
+or **Local branches**. Select a branch to inspect it without checking it out.
 **Refresh** rereads local information without fetching; **Back** returns to the menu
 with your previous selection retained. **Exit** closes Twiglet. Ctrl-C cancels and
 restores the terminal.
@@ -64,17 +65,23 @@ Update Twiglet with a normal pull in its checkout; do not edit `dist/` directly.
 tl status
 tl log
 tl log --limit 50
+tl branches
+tl branch feature/example
 tl --repo /path/to/another/repository
 tl --help
 tl --version
 ```
 
-`status` and `log` print once. `log` defaults to 20 commits; `--limit` accepts 1–100
+`status`, `log`, `branches`, and `branch <name>` print once. `branch` accepts an exact
+local branch name, not a revision expression or remote-only reference. All commands
+support `--repo`. `log` defaults to 20 commits; `--limit` accepts 1–100
 and is only valid with `log`. Bare `tl` also prints once when input/output is redirected
 or the terminal declares itself `dumb`; it never waits for an invisible menu.
 Normal exit is 0, fatal command/inspection errors are 1, and cancellation is 130.
 An unavailable upstream comparison is supplementary information: `status` still
-prints the useful overview and exits 0, with a visible explanation. Interactive
+prints the useful overview and exits 0, with a visible explanation. Similarly,
+`branch` preserves branch metadata if history or comparison fails, with a diagnostic
+and exit 0. Missing branches and detected ref changes fail with exit 1. Interactive
 inspection errors stay in the session so you can Refresh, go Back, or Exit.
 
 ## Current scope and limits
@@ -103,7 +110,22 @@ timestamp with offset, and a merge marker where applicable. The reusable core ke
 full IDs and parent IDs. Unborn branches have an empty history; detached HEAD and
 shallow history work, with shallow history labelled as incomplete. History reads
 neither the working-tree status nor upstream divergence. There is no pagination,
-graph, commit-detail view, or branch selection yet.
+graph, or commit-detail view yet.
+
+Local branches are ordered with the current branch first, then newest tip commit
+date, with name as a tie-breaker. The list includes shortened subjects and tracking
+relationships; tip dates do not indicate when a branch was last used. The selector
+scrolls, with Back and Refresh above the branches. Returning or refreshing retains
+the selected reference if it still exists. Refresh rereads local state only.
+
+Selected-branch details show the complete tip subject, author, timestamp and ID,
+locally known upstream divergence, and the latest 20 reachable commits. They neither
+check out the branch nor scan the working tree. Unborn branches show no commits;
+detached HEAD has no current local branch. “Current” refers only to the inspected
+worktree. A branch moved or deleted during inspection produces a Refresh diagnostic.
+Listing uses bulk metadata queries; history and divergence are loaded only for the
+selected branch. Remote-branch browsing, filtering, worktree inventory, arbitrary
+comparisons, and branch mutations are not included.
 
 Inspection disables optional index writes, filesystem-monitor helpers, and external
 clean/process filters without changing configuration. Filtered paths may consequently
@@ -148,6 +170,11 @@ Milestone 2 was validated locally on Windows with Node 22.16.0 and 24.20.0 and G
 passed on both Node versions. The native terminal also exercised both views,
 Refresh, Back, Exit, and cancellation. Its macOS/Linux CI validation is pending.
 
+Milestone 3 passed all 49 tests, type checking, and distribution freshness checks
+on Windows with Node 22.16.0 and 24.20.0 and Git 2.43.0.windows.1. This includes
+branch navigation and commands from an isolated checkout without installation.
+The existing six-job CI matrix still needs to confirm this milestone after push.
+
 ## Direction
 
 Initial areas to explore include:
@@ -185,8 +212,8 @@ For substantial changes, propose a plan for review before implementation. Small,
 well-contained changes can usually be made directly and summarized afterward.
 See [AGENTS.md](AGENTS.md) for practical guidance for coding agents.
 
-Milestone 2 adds recent commits and locally known upstream divergence. Branch
-exploration and focused branch comparisons are natural next areas to discuss;
+Milestone 3 adds local branch exploration. Focused branch comparisons are a natural
+next area to discuss after trying the selection workflow in real repositories;
 their exact interaction and scope remain open.
 
 ## License

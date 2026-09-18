@@ -1614,8 +1614,8 @@ var import_node_child_process = require("node:child_process");
 
 // src/core/types.ts
 var RepositoryError = class extends Error {
-  constructor(message, options) {
-    super(message, options);
+  constructor(message2, options) {
+    super(message2, options);
     this.name = "RepositoryError";
   }
 };
@@ -1646,8 +1646,8 @@ function runGit(cwd, args, signal) {
     const err = [];
     let size = 0;
     let failure;
-    const stop = (message) => {
-      failure ??= new RepositoryError(message);
+    const stop = (message2) => {
+      failure ??= new RepositoryError(message2);
       child.kill();
     };
     const abort = () => stop("Repository inspection cancelled.");
@@ -1808,13 +1808,13 @@ function parseDivergence(data) {
   if (!Number.isSafeInteger(ahead) || !Number.isSafeInteger(behind)) throw new RepositoryError("Divergence counts exceed the supported range.");
   return { ahead, behind };
 }
-async function readUpstream(cwd, head, shallow, signal, run = runGit) {
+async function readUpstream(cwd, head, shallow, signal, run = runGit, verifyHead = true) {
   let target;
   let configured;
-  const unavailable = (reason, message) => ({
+  const unavailable = (reason, message2) => ({
     kind: "unavailable",
     reason,
-    message,
+    message: message2,
     ...target ? { target } : {},
     ...configured ? { configured } : {}
   });
@@ -1853,7 +1853,7 @@ async function readUpstream(cwd, head, shallow, signal, run = runGit) {
   };
   try {
     const result = await inspect();
-    if (!sameHead(head, await readHead(cwd, signal, run))) return unavailable("changed-head", "HEAD changed during inspection. Refresh to compare the current HEAD.");
+    if (verifyHead && !sameHead(head, await readHead(cwd, signal, run))) return unavailable("changed-head", "HEAD changed during inspection. Refresh to compare the current HEAD.");
     return result;
   } catch (error) {
     if (signal?.aborted) throw error;
@@ -1907,11 +1907,8 @@ function parseHistory(data) {
 }
 
 // src/core/history.ts
-async function readRecentCommits(directory, limit = 20, signal) {
-  if (!Number.isInteger(limit) || limit < 1 || limit > 100) throw new RepositoryError("Commit limit must be an integer from 1 to 100.");
-  const { cwd, root, shallow } = await discover(directory, signal);
-  const head = await readHead(cwd, signal);
-  const commits = head.kind === "unborn" ? [] : parseHistory(await git(cwd, [
+async function readCommitHistory(cwd, oid, limit, signal, run = runGit) {
+  const result = await run(cwd, [
     "log",
     "-z",
     "--date-order",
@@ -1923,11 +1920,231 @@ async function readRecentCommits(directory, limit = 20, signal) {
     "--no-use-mailmap",
     "--encoding=UTF-8",
     "--format=%H%x00%P%x00%an%x00%cI%x00%s",
-    head.oid,
+    oid,
     "--"
-  ], signal));
+  ], signal);
+  if (result.code !== 0) throw new RepositoryError(result.stderr.trim() || "Cannot read commit history.");
+  return parseHistory(result.stdout);
+}
+async function readRecentCommits(directory, limit = 20, signal) {
+  if (!Number.isInteger(limit) || limit < 1 || limit > 100) throw new RepositoryError("Commit limit must be an integer from 1 to 100.");
+  const { cwd, root, shallow } = await discover(directory, signal);
+  const head = await readHead(cwd, signal);
+  const commits = head.kind === "unborn" ? [] : await readCommitHistory(cwd, head.oid, limit, signal);
   if (!sameHead(head, await readHead(cwd, signal))) throw new RepositoryError("HEAD changed during history inspection. Refresh to try again.");
   return { root, head, shallow, limit, commits: commits.slice(0, limit), hasMore: commits.length > limit };
+}
+
+// src/git/branches.ts
+var branchFormat = "%(refname)%00%(objectname)%00%(parent)%00%(authorname)%00%(committerdate:iso-strict)%00%(subject)%00%(upstream)%00%(upstream:remotename)%00";
+function parseBranches(data) {
+  if (!data.length) return [];
+  const fields2 = data.toString("utf8").split("\0");
+  if (fields2.pop() !== "\n" || fields2.length % 8 !== 0) throw new RepositoryError("Git returned malformed branch records.");
+  const rows = [];
+  for (let index = 0; index < fields2.length; index += 8) {
+    const [rawRef, oid, parents, author, committedAt, subject, upstream, remote] = fields2.slice(index, index + 8);
+    const ref = rawRef.replace(/^\n/, "");
+    if (!ref.startsWith("refs/heads/") || !oid || !/^[0-9a-f]+$/.test(oid) || parents === void 0 || parents && !/^[0-9a-f]+(?: [0-9a-f]+)*$/.test(parents) || !committedAt || !Number.isFinite(Date.parse(committedAt)) || remote === void 0) {
+      throw new RepositoryError("Git returned malformed branch metadata.");
+    }
+    rows.push({ ref, tip: { oid, parents: parents ? parents.split(" ") : [], author, committedAt, subject }, upstream, remote });
+  }
+  return rows;
+}
+
+// src/core/branches.ts
+var message = (error) => error instanceof Error ? error.message : String(error);
+async function readList(cwd, root, signal) {
+  const head = await readHead(cwd, signal);
+  const rows = parseBranches(await git(cwd, ["for-each-ref", `--format=${branchFormat}`, "--", "refs/heads/"], signal));
+  let trackingError;
+  const configured = /* @__PURE__ */ new Map();
+  let refs = /* @__PURE__ */ new Set();
+  try {
+    refs = new Set((await git(cwd, ["for-each-ref", "--format=%(refname)"], signal)).toString("utf8").split("\n"));
+    const config = await runGit(cwd, ["config", "--null", "--get-regexp", "^branch\\..*\\.(remote|merge)$"], signal);
+    if (config.code !== 0 && config.code !== 1) throw new RepositoryError(config.stderr.trim() || "Cannot read tracking configuration.");
+    for (const record of config.stdout.toString("utf8").split("\0").filter(Boolean)) {
+      const separator = record.indexOf("\n");
+      const match = /^branch\.(.*)\.(remote|merge)$/.exec(record.slice(0, separator));
+      if (!match || separator < 0) throw new RepositoryError("Malformed branch configuration.");
+      const values = configured.get(match[1]) ?? { remote: [], merge: [] };
+      values[match[2]].push(record.slice(separator + 1));
+      configured.set(match[1], values);
+    }
+  } catch (error) {
+    if (signal?.aborted) throw error;
+    trackingError = message(error);
+  }
+  const tracking = (name, upstream = "", remote = "") => {
+    if (trackingError) return { kind: "unavailable", message: trackingError };
+    const config = configured.get(name);
+    if (!config && !upstream) return { kind: "none" };
+    if (config?.merge.length !== 1 || !upstream) return { kind: "unavailable", message: "Configured upstream cannot be resolved to one local reference." };
+    return { kind: "configured", target: { ref: upstream, source: remote === "." ? "local-branch" : "remote-tracking" }, available: refs.has(upstream) };
+  };
+  const branches = rows.map((row) => ({
+    ref: row.ref,
+    name: row.ref.slice(11),
+    tip: row.tip,
+    current: head.kind !== "detached" && row.ref === `refs/heads/${head.name}`,
+    tracking: tracking(row.ref.slice(11), row.upstream, row.remote)
+  }));
+  if (head.kind === "unborn") branches.push({ ref: `refs/heads/${head.name}`, name: head.name, current: true, tip: null, tracking: tracking(head.name) });
+  if (!sameHead(head, await readHead(cwd, signal))) throw new RepositoryError("HEAD changed while listing branches. Refresh to try again.");
+  branches.sort((a, b) => Number(b.current) - Number(a.current) || Date.parse(b.tip?.committedAt ?? "1970-01-01") - Date.parse(a.tip?.committedAt ?? "1970-01-01") || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+  return { root, head, branches };
+}
+async function listLocalBranches(directory, signal) {
+  const { cwd, root } = await discover(directory, signal);
+  return readList(cwd, root, signal);
+}
+async function readBranchDetails(directory, name, signal, run = runGit) {
+  const { cwd, root, shallow } = await discover(directory, signal);
+  const branch = (await readList(cwd, root, signal)).branches.find((entry) => entry.name === name);
+  if (!branch) throw new RepositoryError(`Local branch not found: ${name}`);
+  const head = branch.tip ? { kind: "branch", name, oid: branch.tip.oid } : { kind: "unborn", name };
+  const upstream = await readUpstream(cwd, head, shallow, signal, run, false);
+  let history;
+  try {
+    const commits = branch.tip ? await readCommitHistory(cwd, branch.tip.oid, 20, signal, run) : [];
+    history = { kind: "available", commits: commits.slice(0, 20), hasMore: commits.length > 20 };
+  } catch (error) {
+    if (signal?.aborted) throw error;
+    history = { kind: "unavailable", message: message(error) };
+  }
+  const after = await run(cwd, ["rev-parse", "--verify", "--quiet", "--end-of-options", branch.ref], signal);
+  const unchanged = branch.tip ? after.code === 0 && after.stdout.toString("ascii").trim() === branch.tip.oid : after.code === 1 && sameHead(head, await readHead(cwd, signal));
+  if (!unchanged) throw new RepositoryError("Selected branch changed or disappeared during inspection. Refresh to try again.");
+  const current = await readHead(cwd, signal);
+  branch.current = current.kind !== "detached" && current.name === name;
+  return { root, branch, shallow, upstream, history };
+}
+
+// src/terminal/render.ts
+function safeText(value) {
+  return value.replace(
+    /[\x00-\x1f\x7f-\x9f\u202a-\u202e\u2066-\u2069]/g,
+    (char) => `\\u${char.charCodeAt(0).toString(16).padStart(4, "0")}`
+  );
+}
+function displayPath(path) {
+  const text = path.toString("utf8");
+  if (!Buffer.from(text).equals(path)) return `[path bytes: ${path.toString("hex")}]`;
+  return safeText(text);
+}
+function headLabel(head) {
+  return head.kind === "detached" ? `Detached HEAD (${head.oid.slice(0, 12)})` : head.kind === "unborn" ? `${safeText(head.name)} (no commits yet)` : `${safeText(head.name)} (${head.oid.slice(0, 12)})`;
+}
+function renderUpstream(upstream) {
+  if (upstream.kind === "none") return ["Upstream: not configured"];
+  const target = upstream.target;
+  const name = target ? safeText(target.ref.replace(/^refs\/(heads|remotes)\//, "")) : upstream.kind === "unavailable" && upstream.configured ? safeText(upstream.configured) : "unavailable";
+  const lines = [`Upstream: ${name}${target?.source === "local-branch" ? " (local branch)" : ""}`];
+  if (upstream.kind === "compared") {
+    lines.push(upstream.ahead === 0 && upstream.behind === 0 ? "Matches the local upstream reference." : `Ahead: ${upstream.ahead} commits   Behind: ${upstream.behind} commits`);
+  } else lines.push(`Comparison unavailable: ${safeText(upstream.message)}`);
+  if (target?.source === "remote-tracking") {
+    lines.push("Remote-tracking information is local. Remote freshness unknown; no fetch performed.");
+  }
+  return lines;
+}
+function renderOverview(overview) {
+  const { head, changes } = overview;
+  const lines = [
+    "Repository overview",
+    `Location: ${safeText(overview.root)}`,
+    `HEAD: ${headLabel(head)}`,
+    ...renderUpstream(overview.upstream)
+  ];
+  if (overview.shallow) lines.push("History: shallow clone; history is incomplete.");
+  if (overview.filtersDisabled) lines.push("External clean filters disabled; filtered paths may appear modified.");
+  lines.push("");
+  const groups = [
+    ["Conflicts", changes.filter((c) => c.kind === "conflict")],
+    ["Staged", changes.filter((c) => c.kind !== "conflict" && c.kind !== "untracked" && c.index !== ".")],
+    ["Unstaged", changes.filter((c) => c.kind !== "conflict" && c.kind !== "untracked" && c.worktree !== ".")],
+    ["Untracked", changes.filter((c) => c.kind === "untracked")]
+  ];
+  if (!changes.length) lines.push("Working tree: clean (excluding submodule contents).");
+  for (const [title, entries] of groups) {
+    if (!entries.length) continue;
+    lines.push(`${title}: ${entries.length} ${entries.length === 1 ? "entry" : "entries"}`);
+    for (const entry of entries.slice(0, 30)) {
+      const from = entry.originalPath ? `${displayPath(entry.originalPath)} -> ` : "";
+      lines.push(`  ${entry.index}${entry.worktree} ${from}${displayPath(entry.path)}`);
+    }
+    if (entries.length > 30) lines.push(`  ... ${entries.length - 30} more entries`);
+  }
+  lines.push(
+    "",
+    "Untracked directories are grouped. A path can be both staged and unstaged.",
+    "Submodule worktrees are not inspected. No fetch is performed."
+  );
+  return lines.join("\n") + "\n";
+}
+function renderHistory(history) {
+  const lines = [
+    "Recent commits",
+    `Location: ${safeText(history.root)}`,
+    `HEAD: ${headLabel(history.head)}`,
+    "History reachable from this HEAD, including merges. Dates are commit dates.",
+    ""
+  ];
+  if (history.head.kind === "unborn") lines.push("No commits yet.");
+  for (const commit of history.commits) {
+    lines.push(
+      `${commit.oid.slice(0, 12)} ${safeText(commit.subject) || "(no subject)"}`,
+      `  ${safeText(commit.author)} | ${commit.committedAt}${commit.parents.length > 1 ? " | merge" : ""}`
+    );
+  }
+  if (history.hasMore) lines.push(`
+Showing ${history.limit} commits; more are available. Use tl log --limit N (up to 100).`);
+  if (history.shallow) lines.push("\nShallow repository: only locally available history is shown.");
+  return lines.join("\n") + "\n";
+}
+
+// src/terminal/branches.ts
+function trackingLabel(branch) {
+  const tracking = branch.tracking;
+  if (tracking.kind === "none") return "no upstream";
+  if (tracking.kind === "unavailable") return `tracking unavailable: ${safeText(tracking.message)}`;
+  return `${safeText(tracking.target.ref)}${tracking.target.source === "local-branch" ? " (local branch)" : ""}${tracking.available ? "" : " (missing locally)"}`;
+}
+function branchChoice(branch) {
+  const subject = safeText(branch.tip?.subject ?? "No commits yet");
+  return `${branch.current ? "* " : ""}${safeText(branch.name)} | ${branch.tip?.committedAt.slice(0, 10) ?? "unborn"} | ${subject.length > 50 ? subject.slice(0, 47) + "..." : subject} | ${trackingLabel(branch)}`;
+}
+function renderBranchContext(list) {
+  return `Local branches
+Location: ${safeText(list.root)}
+${list.head.kind === "detached" ? "HEAD is detached." : `Current branch: ${safeText(list.head.name)}`}
+* Current in this worktree. Dates are tip commit dates, not branch usage dates.
+Remote-tracking information is local; remote freshness unknown. No fetch performed.
+`;
+}
+function renderBranches(list) {
+  return renderBranchContext(list) + "\n" + (list.branches.length ? list.branches.map(branchChoice).join("\n") : "No local branches.") + "\n";
+}
+function renderBranchDetails(details) {
+  const { branch, history } = details;
+  const lines = [
+    "Branch details",
+    `Location: ${safeText(details.root)}`,
+    `Branch: ${safeText(branch.name)}${branch.current ? " (current in this worktree)" : ""}`,
+    "Inspection only; no branch is checked out and no working-tree status is shown."
+  ];
+  if (branch.tip) lines.push(`Tip: ${branch.tip.oid}`, `Subject: ${safeText(branch.tip.subject)}`, `Author: ${safeText(branch.tip.author)}`, `Tip commit date: ${branch.tip.committedAt}`);
+  else lines.push("No commits yet.");
+  lines.push(...renderUpstream(details.upstream), "", "Recent commits reachable from this branch, including merges:");
+  if (history.kind === "unavailable") lines.push(`History unavailable: ${safeText(history.message)}`);
+  else {
+    for (const commit of history.commits) lines.push(`${commit.oid.slice(0, 12)} ${safeText(commit.subject) || "(no subject)"}`, `  ${safeText(commit.author)} | ${commit.committedAt}${commit.parents.length > 1 ? " | merge" : ""}`);
+    if (history.hasMore) lines.push("Showing the latest 20 reachable commits; more are available.");
+  }
+  if (details.shallow) lines.push("Shallow repository: history is incomplete.");
+  return lines.join("\n") + "\n";
 }
 
 // node_modules/@inquirer/core/dist/esm/lib/key.js
@@ -3188,7 +3405,7 @@ var esm_default2 = createPrompt((config, done) => {
   useEffect(() => () => {
     clearTimeout(searchTimeoutRef.current);
   }, []);
-  const message = theme.style.message(config.message, status);
+  const message2 = theme.style.message(config.message, status);
   let helpLine;
   if (theme.helpMode !== "never") {
     if (config.instructions) {
@@ -3223,11 +3440,11 @@ var esm_default2 = createPrompt((config, done) => {
     loop
   });
   if (status === "done") {
-    return [prefix, message, theme.style.answer(selectedChoice.short)].filter(Boolean).join(" ");
+    return [prefix, message2, theme.style.answer(selectedChoice.short)].filter(Boolean).join(" ");
   }
   const { description } = selectedChoice;
   const lines = [
-    [prefix, message].filter(Boolean).join(" "),
+    [prefix, message2].filter(Boolean).join(" "),
     page,
     " ",
     description ? theme.style.description(description) : "",
@@ -3242,8 +3459,8 @@ function createTerminal(signal) {
     write: (text) => {
       process.stdout.write(text);
     },
-    choose: (message, choices, defaultValue) => esm_default2({
-      message,
+    choose: (message2, choices, defaultValue) => esm_default2({
+      message: message2,
       choices,
       loop: false,
       ...defaultValue ? { default: defaultValue } : {},
@@ -3252,92 +3469,46 @@ function createTerminal(signal) {
   };
 }
 
-// src/terminal/render.ts
-function safeText(value) {
-  return value.replace(
-    /[\x00-\x1f\x7f-\x9f\u202a-\u202e\u2066-\u2069]/g,
-    (char) => `\\u${char.charCodeAt(0).toString(16).padStart(4, "0")}`
-  );
-}
-function displayPath(path) {
-  const text = path.toString("utf8");
-  if (!Buffer.from(text).equals(path)) return `[path bytes: ${path.toString("hex")}]`;
-  return safeText(text);
-}
-function headLabel(head) {
-  return head.kind === "detached" ? `Detached HEAD (${head.oid.slice(0, 12)})` : head.kind === "unborn" ? `${safeText(head.name)} (no commits yet)` : `${safeText(head.name)} (${head.oid.slice(0, 12)})`;
-}
-function renderUpstream(upstream) {
-  if (upstream.kind === "none") return ["Upstream: not configured"];
-  const target = upstream.target;
-  const name = target ? safeText(target.ref.replace(/^refs\/(heads|remotes)\//, "")) : upstream.kind === "unavailable" && upstream.configured ? safeText(upstream.configured) : "unavailable";
-  const lines = [`Upstream: ${name}${target?.source === "local-branch" ? " (local branch)" : ""}`];
-  if (upstream.kind === "compared") {
-    lines.push(upstream.ahead === 0 && upstream.behind === 0 ? "Matches the local upstream reference." : `Ahead: ${upstream.ahead} commits   Behind: ${upstream.behind} commits`);
-  } else lines.push(`Comparison unavailable: ${safeText(upstream.message)}`);
-  if (target?.source === "remote-tracking") {
-    lines.push("Remote-tracking information is local. Remote freshness unknown; no fetch performed.");
-  }
-  return lines;
-}
-function renderOverview(overview) {
-  const { head, changes } = overview;
-  const lines = [
-    "Repository overview",
-    `Location: ${safeText(overview.root)}`,
-    `HEAD: ${headLabel(head)}`,
-    ...renderUpstream(overview.upstream)
-  ];
-  if (overview.shallow) lines.push("History: shallow clone; history is incomplete.");
-  if (overview.filtersDisabled) lines.push("External clean filters disabled; filtered paths may appear modified.");
-  lines.push("");
-  const groups = [
-    ["Conflicts", changes.filter((c) => c.kind === "conflict")],
-    ["Staged", changes.filter((c) => c.kind !== "conflict" && c.kind !== "untracked" && c.index !== ".")],
-    ["Unstaged", changes.filter((c) => c.kind !== "conflict" && c.kind !== "untracked" && c.worktree !== ".")],
-    ["Untracked", changes.filter((c) => c.kind === "untracked")]
-  ];
-  if (!changes.length) lines.push("Working tree: clean (excluding submodule contents).");
-  for (const [title, entries] of groups) {
-    if (!entries.length) continue;
-    lines.push(`${title}: ${entries.length} ${entries.length === 1 ? "entry" : "entries"}`);
-    for (const entry of entries.slice(0, 30)) {
-      const from = entry.originalPath ? `${displayPath(entry.originalPath)} -> ` : "";
-      lines.push(`  ${entry.index}${entry.worktree} ${from}${displayPath(entry.path)}`);
-    }
-    if (entries.length > 30) lines.push(`  ... ${entries.length - 30} more entries`);
-  }
-  lines.push(
-    "",
-    "Untracked directories are grouped. A path can be both staged and unstaged.",
-    "Submodule worktrees are not inspected. No fetch is performed."
-  );
-  return lines.join("\n") + "\n";
-}
-function renderHistory(history) {
-  const lines = [
-    "Recent commits",
-    `Location: ${safeText(history.root)}`,
-    `HEAD: ${headLabel(history.head)}`,
-    "History reachable from this HEAD, including merges. Dates are commit dates.",
-    ""
-  ];
-  if (history.head.kind === "unborn") lines.push("No commits yet.");
-  for (const commit of history.commits) {
-    lines.push(
-      `${commit.oid.slice(0, 12)} ${safeText(commit.subject) || "(no subject)"}`,
-      `  ${safeText(commit.author)} | ${commit.committedAt}${commit.parents.length > 1 ? " | merge" : ""}`
-    );
-  }
-  if (history.hasMore) lines.push(`
-Showing ${history.limit} commits; more are available. Use tl log --limit N (up to 100).`);
-  if (history.shallow) lines.push("\nShallow repository: only locally available history is shown.");
-  return lines.join("\n") + "\n";
-}
-
 // src/terminal/session.ts
 function isCancellation(error) {
   return error instanceof Error && ["ExitPromptError", "AbortPromptError", "CancelPromptError"].includes(error.name);
+}
+async function branchSession(terminal, operations, signal) {
+  let selected;
+  while (!signal?.aborted) {
+    let list;
+    try {
+      list = await operations.branches();
+      terminal.write("\n" + renderBranchContext(list));
+    } catch (error) {
+      if (signal?.aborted) return;
+      terminal.write(`
+Unable to list branches: ${safeText(error instanceof Error ? error.message : String(error))}
+`);
+      if (await terminal.choose("Navigation", [{ name: "Back", value: "back" }, { name: "Refresh", value: "refresh" }]) === "back") return;
+      continue;
+    }
+    const choices = [{ name: "Back", value: "back" }, { name: "Refresh", value: "refresh" }, ...list.branches.map((branch2) => ({ name: branchChoice(branch2), value: branch2.ref }))];
+    if (!list.branches.length) terminal.write("No local branches.\n");
+    const choice = await terminal.choose("Local branches", choices, list.branches.some((b) => b.ref === selected) ? selected : list.branches[0]?.ref ?? "back");
+    if (choice === "back") return;
+    if (choice === "refresh") continue;
+    selected = choice;
+    const branch = list.branches.find((b) => b.ref === choice);
+    let action = "refresh";
+    while (action === "refresh" && !signal?.aborted) {
+      terminal.write("\nInspecting branch...\n");
+      try {
+        terminal.write(renderBranchDetails(await operations.branch(branch.name)));
+      } catch (error) {
+        if (signal?.aborted) return;
+        terminal.write(`Unable to inspect branch: ${safeText(error instanceof Error ? error.message : String(error))}
+`);
+      }
+      if (signal?.aborted) return;
+      action = await terminal.choose("Navigation", [{ name: "Back", value: "back" }, { name: "Refresh", value: "refresh" }]);
+    }
+  }
 }
 async function interactiveSession(terminal, operations, signal) {
   let selected = "overview";
@@ -3345,10 +3516,15 @@ async function interactiveSession(terminal, operations, signal) {
     const action = await terminal.choose("Twiglet", [
       { name: "Repository overview", value: "overview" },
       { name: "Recent commits", value: "history" },
+      { name: "Local branches", value: "branches" },
       { name: "Exit", value: "exit" }
     ], selected);
     if (action === "exit") return;
     selected = action;
+    if (action === "branches") {
+      await branchSession(terminal, operations, signal);
+      continue;
+    }
     let navigation = "refresh";
     while (navigation === "refresh" && !signal?.aborted) {
       terminal.write("\nInspecting repository...\n");
@@ -3367,17 +3543,20 @@ Unable to inspect repository: ${safeText(error instanceof Error ? error.message 
 }
 
 // src/cli.ts
-var help = `Twiglet 0.2.0 - a small Git repository companion
+var help = `Twiglet 0.3.0 - a small Git repository companion
 
 Usage: tl [--repo <directory>] [status]
        tl [--repo <directory>] log [--limit N]
+       tl [--repo <directory>] branches
+       tl [--repo <directory>] branch <name>
        tl --help
        tl --version
 
-Run tl in a terminal for Repository overview or Recent commits, with Refresh/Back.
+Run tl in a terminal for Repository overview, Recent commits, or Local branches.
 Without an interactive terminal, print the overview and exit.
 status always prints the overview. --repo defaults to the current directory.
 log prints history reachable from HEAD, including merges (default 20, limit 1-100).
+branches lists local branches. branch inspects one exact local name without checkout.
 Unavailable upstream comparison does not fail an otherwise useful overview.
 Requires Node 22+ and installed Git. No fetch or repository changes.
 `;
@@ -3385,6 +3564,7 @@ async function main() {
   const args = process.argv.slice(2);
   let directory = process.cwd();
   let command;
+  let branchName;
   let limit;
   let information;
   let repoSet = false;
@@ -3394,8 +3574,13 @@ async function main() {
       if (!args[i + 1] || args[i + 1].startsWith("--")) throw new Error("--repo requires a directory.");
       directory = args[++i];
       repoSet = true;
-    } else if ((arg === "status" || arg === "log") && !command) command = arg;
-    else if (arg === "--limit" && limit === void 0) {
+    } else if ((arg === "status" || arg === "log" || arg === "branches" || arg === "branch") && !command) {
+      command = arg;
+      if (arg === "branch") {
+        branchName = args[++i];
+        if (!branchName) throw new Error("branch requires a local branch name.");
+      }
+    } else if (arg === "--limit" && limit === void 0) {
       const value = args[++i];
       if (!value || !/^\d+$/.test(value) || Number(value) < 1 || Number(value) > 100) throw new Error("--limit requires an integer from 1 to 100.");
       limit = Number(value);
@@ -3404,7 +3589,7 @@ async function main() {
     else throw new Error(`Unknown argument: ${arg}. Use --help for usage.`);
   }
   if (information) {
-    process.stdout.write(information === "help" ? help : "0.2.0\n");
+    process.stdout.write(information === "help" ? help : "0.3.0\n");
     return;
   }
   if (limit !== void 0 && command !== "log") throw new Error("--limit is only supported with log.");
@@ -3416,9 +3601,15 @@ async function main() {
   try {
     const operations = {
       overview: () => readOverview(directory, abort.signal),
-      history: () => readRecentCommits(directory, limit ?? 20, abort.signal)
+      history: () => readRecentCommits(directory, limit ?? 20, abort.signal),
+      branches: () => listLocalBranches(directory, abort.signal),
+      branch: (name) => readBranchDetails(directory, name, abort.signal)
     };
-    if (command === "log") {
+    if (command === "branches") {
+      process.stdout.write(renderBranches(await operations.branches()));
+    } else if (command === "branch") {
+      process.stdout.write(renderBranchDetails(await operations.branch(branchName)));
+    } else if (command === "log") {
       process.stdout.write(renderHistory(await operations.history()));
     } else if (command === "status" || !process.stdin.isTTY || !process.stdout.isTTY || process.env.TERM === "dumb") {
       process.stdout.write(renderOverview(await operations.overview()));
