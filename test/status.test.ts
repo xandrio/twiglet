@@ -33,7 +33,7 @@ for (const [label, raw] of [
 }
 test('escapes terminal controls and labels overlapping counts and truncation', () => {
   assert.equal(safeText('x\x1b[2J\n'), 'x\\u001b[2J\\u000a');
-  const text = renderOverview({ root: '/repo', head: { kind: 'unborn', name: 'topic' }, shallow: true, filtersDisabled: false,
+  const text = renderOverview({ root: '/repo', head: { kind: 'unborn', name: 'topic' }, upstream: { kind: 'none' }, shallow: true, filtersDisabled: false,
     changes: Array.from({ length: 31 }, (_, i) => ({ kind: 'tracked' as const, path: Buffer.from(`f${i}`), index: 'M', worktree: 'M' })) });
   assert.match(text, /Staged: 31 entries/);
   assert.match(text, /Unstaged: 31 entries/);

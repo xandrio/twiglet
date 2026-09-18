@@ -1,9 +1,20 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdtemp, mkdir, realpath, rm, stat, symlink, writeFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
+import { mkdtemp, mkdir, readFile, readdir, realpath, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import type { TestContext } from 'node:test';
+
+export async function snapshot(root: string, prefix = ''): Promise<Record<string, string>> {
+  const files: Record<string, string> = {};
+  for (const entry of await readdir(path.join(root, prefix), { withFileTypes: true })) {
+    const name = path.join(prefix, entry.name);
+    if (entry.isDirectory()) Object.assign(files, await snapshot(root, name));
+    else files[name] = createHash('sha256').update(await readFile(path.join(root, name))).digest('hex');
+  }
+  return files;
+}
 
 /** Compare directory identity, not spelling (symlinks, Windows short names, separators). */
 export async function assertSameDirectory(actual: string, expected: string): Promise<void> {

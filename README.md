@@ -4,9 +4,9 @@ Twiglet is a small, lightweight companion for working with Git repositories. Its
 first focus is a terminal/CLI experience that makes everyday repository information
 quick to understand.
 
-This is an early-stage personal project intended to be open source. The first
-milestone is an interactive walking skeleton: `tl` opens a menu, Repository
-overview inspects the current repository, and Back returns to the menu.
+This is an early-stage personal project intended to be open source. `tl` opens an
+interactive menu for repository overview and recent commits, with local upstream
+divergence in the overview. Each view offers Refresh and Back.
 
 ## Technical direction
 
@@ -38,8 +38,10 @@ From the repository you want to inspect, run:
 node /path/to/twiglet/dist/twiglet.cjs
 ```
 
-Use the arrow keys and Enter to select **Repository overview**, then **Back**, then
-**Exit**. Ctrl-C cancels and restores the terminal. Reopen the overview to refresh.
+Use the arrow keys and Enter to select **Repository overview** or **Recent commits**.
+**Refresh** rereads local information without fetching; **Back** returns to the menu
+with your previous selection retained. **Exit** closes Twiglet. Ctrl-C cancels and
+restores the terminal.
 
 A short PowerShell function can point to your Twiglet checkout:
 
@@ -60,26 +62,48 @@ Update Twiglet with a normal pull in its checkout; do not edit `dist/` directly.
 
 ```text
 tl status
+tl log
+tl log --limit 50
 tl --repo /path/to/another/repository
 tl --help
 tl --version
 ```
 
-`status` prints once. Bare `tl` also prints once when input/output is redirected
+`status` and `log` print once. `log` defaults to 20 commits; `--limit` accepts 1–100
+and is only valid with `log`. Bare `tl` also prints once when input/output is redirected
 or the terminal declares itself `dumb`; it never waits for an invisible menu.
-Normal exit is 0, command/inspection errors are 1, and cancellation is 130.
-Interactive inspection errors stay in the session so you can go Back and Exit.
+Normal exit is 0, fatal command/inspection errors are 1, and cancellation is 130.
+An unavailable upstream comparison is supplementary information: `status` still
+prints the useful overview and exits 0, with a visible explanation. Interactive
+inspection errors stay in the session so you can Refresh, go Back, or Exit.
 
 ## Current scope and limits
 
 The overview shows repository location, attached/unborn/detached HEAD, configured
-upstream, and grouped staged, unstaged, conflict, and untracked entries. It works
-from nested directories and linked worktrees. It does not fetch or calculate
-ahead/behind counts yet. Location is the absolute worktree root reported by Git,
+upstream divergence, and grouped staged, unstaged, conflict, and untracked entries.
+It works from nested directories and linked worktrees. Location is the absolute worktree root reported by Git,
 not the invocation directory or its original spelling. Symlinks and Windows short
 directory names may resolve to a different spelling of the same physical directory.
 Untracked directories are grouped and each change group
 shows at most 30 entries; a path can be both staged and unstaged.
+
+Ahead/behind counts compare captured HEAD with the configured upstream reference
+stored locally, using Git's mapping (including custom remotes and local-branch
+upstreams). Ahead means commits reachable only from HEAD; behind means commits
+reachable only from the upstream. Equal counts mean the local references match,
+not that a server is current. Remote freshness is always unknown: Twiglet neither
+fetches nor infers freshness from timestamps. Absent configuration, missing local
+refs, unresolved configuration, detached/unborn HEAD, incomplete shallow history,
+HEAD changes during inspection, and comparison errors have explicit states;
+unavailable counts are never shown as zero.
+
+Recent commits show history reachable from captured HEAD, including merged ancestry,
+in Git's date order. Entries include an abbreviated ID, subject, author, commit
+timestamp with offset, and a merge marker where applicable. The reusable core keeps
+full IDs and parent IDs. Unborn branches have an empty history; detached HEAD and
+shallow history work, with shallow history labelled as incomplete. History reads
+neither the working-tree status nor upstream divergence. There is no pagination,
+graph, commit-detail view, or branch selection yet.
 
 Inspection disables optional index writes, filesystem-monitor helpers, and external
 clean/process filters without changing configuration. Filtered paths may consequently
@@ -114,14 +138,15 @@ Tests create disposable real Git repositories and clone a snapshot of the candid
 files to exercise the artifact without installation. Terminal-like stream tests
 exercise the bundled prompt and cancellation; these are distinct from native
 terminal smoke tests. The CI workflow runs Node 22 and 24 on Windows, macOS, and
-Linux. Configuring that matrix does not mean those jobs have already run.
+Linux. Milestone 1 passed that matrix. Each subsequent change still needs its own
+CI run; local Windows validation does not substitute for macOS/Linux execution.
+The suite covers real commit graphs, local and remote-tracking upstreams, incomplete
+and unavailable information, refresh/error navigation, and the isolated distribution.
 
-Milestone 1 was validated on Windows with Node 22.16.0 and 24.20.0 and Git
-2.43.0.windows.1: 25 tests passed on each Node version, including the isolated
-clone and bundled menu tests. A native terminal walkthrough also exercised
-Overview -> Back -> Exit and Ctrl-C cleanup. macOS/Linux execution remains to
-be confirmed by CI. Node 20 was checked only for the clear unsupported-version
-message, not for application compatibility.
+Milestone 2 was validated locally on Windows with Node 22.16.0 and 24.20.0 and Git
+2.43.0.windows.1: all 42 tests, type checking, and distribution freshness checks
+passed on both Node versions. The native terminal also exercised both views,
+Refresh, Back, Exit, and cancellation. Its macOS/Linux CI validation is pending.
 
 ## Direction
 
@@ -160,8 +185,9 @@ For substantial changes, propose a plan for review before implementation. Small,
 well-contained changes can usually be made directly and summarized afterward.
 See [AGENTS.md](AGENTS.md) for practical guidance for coding agents.
 
-The approved first milestone is the interactive overview. Recent commits, richer
-branch exploration, and comparisons follow after that workflow is useful.
+Milestone 2 adds recent commits and locally known upstream divergence. Branch
+exploration and focused branch comparisons are natural next areas to discuss;
+their exact interaction and scope remain open.
 
 ## License
 

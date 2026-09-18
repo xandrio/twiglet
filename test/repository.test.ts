@@ -1,21 +1,10 @@
 import assert from 'node:assert/strict';
-import { createHash } from 'node:crypto';
-import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
+import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import test from 'node:test';
 import { readOverview } from '../src/core/repository.js';
 import { runGit } from '../src/git/run.js';
-import { assertSameDirectory, directoryAlias, fixtureGit, repository, temp } from './helpers.js';
-
-async function snapshot(root: string, prefix = ''): Promise<Record<string, string>> {
-  const files: Record<string, string> = {};
-  for (const entry of await readdir(path.join(root, prefix), { withFileTypes: true })) {
-    const name = path.join(prefix, entry.name);
-    if (entry.isDirectory()) Object.assign(files, await snapshot(root, name));
-    else files[name] = createHash('sha256').update(await readFile(path.join(root, name))).digest('hex');
-  }
-  return files;
-}
+import { assertSameDirectory, directoryAlias, fixtureGit, repository, snapshot, temp } from './helpers.js';
 
 test('real Git: clean repository, nested directory, and no content mutations', async (t) => {
   const root = await repository(t);
@@ -87,7 +76,8 @@ test('real Git: linked worktree and local upstream configuration', async (t) => 
   fixtureGit(linked, 'branch', '--set-upstream-to=topic');
   const result = await readOverview(linked);
   await assertSameDirectory(result.root, linked);
-  assert.equal(result.upstream, 'topic');
+  assert.equal(result.upstream.kind, 'compared');
+  assert.equal(result.upstream.kind === 'compared' && result.upstream.target.ref, 'refs/heads/topic');
   assert.equal(result.head.kind === 'branch' && result.head.name, 'linked');
 });
 test('does not contact a configured transport or execute an fsmonitor hook', async (t) => {
@@ -101,7 +91,9 @@ test('does not contact a configured transport or execute an fsmonitor hook', asy
   fixtureGit(root, 'config', 'branch.topic.merge', 'refs/heads/topic');
   fixtureGit(root, 'update-ref', 'refs/remotes/other/topic', 'HEAD');
   const before = await snapshot(root);
-  assert.equal((await readOverview(root)).upstream, 'other/topic');
+  const upstream = (await readOverview(root)).upstream;
+  assert.equal(upstream.kind, 'compared');
+  assert.equal(upstream.kind === 'compared' && upstream.target.ref, 'refs/remotes/other/topic');
   assert.deepEqual(await snapshot(root), before);
 });
 test('rejects partial-clone configuration before object inspection', async (t) => {

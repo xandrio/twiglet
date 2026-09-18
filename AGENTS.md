@@ -18,8 +18,8 @@ closed specification.
   parsing in `src/git`, and interactive navigation/rendering in `src/terminal`.
   `src/cli.ts` owns arguments and process-level behavior. Core code must not prompt,
   print, change global working directories, or exit the process.
-- The primary experience is `tl` -> menu -> Repository overview -> Back -> Exit.
-  Build this vertical slice early, not after a large noninteractive backend phase.
+- The primary experience is `tl` -> Repository overview or Recent commits, with
+  Refresh/Back navigation. Direct `status` and `log --limit N` share core operations.
 - Call Git with argument arrays, never shell commands. Inspection must neither
   mutate repositories nor contact remotes. Account for optional index writes,
   partial-clone lazy fetching, external helpers, and inherited Git environment.
@@ -43,8 +43,17 @@ machine runs `node /path/to/twiglet/dist/twiglet.cjs` with no preparation.
 The first overview deliberately excludes submodule worktrees, rejects partial-clone
 configuration, and disables external clean/process filters (which may make filtered
 paths appear modified). Do not remove these guards without preserving offline,
-non-mutating inspection. Interactive errors allow Back/Exit; noninteractive errors
-exit 1. The CI matrix is a validation plan, not evidence of a completed platform run.
+non-mutating inspection. Fatal inspection/argument errors exit 1; cancellation exits
+130. Upstream comparison is supplementary: failures appear as unavailable information
+and do not fail an otherwise useful overview (including direct `status`, exit 0).
+
+Milestone 2 adds bounded history reachable from captured HEAD (including merged
+history) and divergence against the configured, locally available upstream. Resolve
+refs to full IDs; distinguish absent config, missing refs, shallow history, detached/
+unborn HEAD, races, and operational errors. Never replace unavailable counts with 0
+or imply remote freshness. Local-branch upstreams need no remote-freshness claim.
+History must not scan the worktree or calculate divergence. Refresh reads local
+state only. No network access, watch service, pagination, graph, or desktop scope.
 
 ## Collaboration and decisions
 

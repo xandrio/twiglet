@@ -1,24 +1,29 @@
 import { readOverview } from './core/repository.js';
+import { readRecentCommits } from './core/history.js';
 import { createTerminal } from './terminal/prompt.js';
 import { interactiveSession, isCancellation } from './terminal/session.js';
-import { renderOverview, safeText } from './terminal/render.js';
+import { renderHistory, renderOverview, safeText } from './terminal/render.js';
 
-const help = `Twiglet 0.1.0 - a small Git repository companion
+const help = `Twiglet 0.2.0 - a small Git repository companion
 
 Usage: tl [--repo <directory>] [status]
+       tl [--repo <directory>] log [--limit N]
        tl --help
        tl --version
 
-Run tl in a terminal for Repository overview -> Back -> Exit.
+Run tl in a terminal for Repository overview or Recent commits, with Refresh/Back.
 Without an interactive terminal, print the overview and exit.
 status always prints the overview. --repo defaults to the current directory.
+log prints history reachable from HEAD, including merges (default 20, limit 1-100).
+Unavailable upstream comparison does not fail an otherwise useful overview.
 Requires Node 22+ and installed Git. No fetch or repository changes.
 `;
 
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
   let directory = process.cwd();
-  let direct = false;
+  let command: 'status' | 'log' | undefined;
+  let limit: number | undefined;
   let information: 'help' | 'version' | undefined;
   let repoSet = false;
   for (let i = 0; i < args.length; i++) {
@@ -27,23 +32,34 @@ async function main(): Promise<void> {
       if (!args[i + 1] || args[i + 1]!.startsWith('--')) throw new Error('--repo requires a directory.');
       directory = args[++i]!;
       repoSet = true;
-    } else if (arg === 'status' && !direct) direct = true;
+    } else if ((arg === 'status' || arg === 'log') && !command) command = arg;
+    else if (arg === '--limit' && limit === undefined) {
+      const value = args[++i];
+      if (!value || !/^\d+$/.test(value) || Number(value) < 1 || Number(value) > 100) throw new Error('--limit requires an integer from 1 to 100.');
+      limit = Number(value);
+    }
     else if (arg === '--help' || arg === '-h') information = 'help';
     else if (arg === '--version') information = 'version';
     else throw new Error(`Unknown argument: ${arg}. Use --help for usage.`);
   }
-  if (information) { process.stdout.write(information === 'help' ? help : '0.1.0\n'); return; }
+  if (information) { process.stdout.write(information === 'help' ? help : '0.2.0\n'); return; }
+  if (limit !== undefined && command !== 'log') throw new Error('--limit is only supported with log.');
   const abort = new AbortController();
   const interrupt = () => abort.abort();
   process.on('SIGINT', interrupt);
   process.on('SIGTERM', interrupt);
   const wasRaw = process.stdin.isRaw ?? false;
   try {
-    const inspect = () => readOverview(directory, abort.signal);
-    if (direct || !process.stdin.isTTY || !process.stdout.isTTY || process.env.TERM === 'dumb') {
-      process.stdout.write(renderOverview(await inspect()));
+    const operations = {
+      overview: () => readOverview(directory, abort.signal),
+      history: () => readRecentCommits(directory, limit ?? 20, abort.signal),
+    };
+    if (command === 'log') {
+      process.stdout.write(renderHistory(await operations.history()));
+    } else if (command === 'status' || !process.stdin.isTTY || !process.stdout.isTTY || process.env.TERM === 'dumb') {
+      process.stdout.write(renderOverview(await operations.overview()));
     } else {
-      await interactiveSession(createTerminal(abort.signal), inspect, abort.signal);
+      await interactiveSession(createTerminal(abort.signal), operations, abort.signal);
     }
     if (abort.signal.aborted) process.exitCode = 130;
   } catch (error) {

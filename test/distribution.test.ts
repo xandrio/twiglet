@@ -51,7 +51,25 @@ test('candidate checkout can be cloned and run without install, build, or node_m
   assert.equal(explicit.status, 0, explicit.stderr);
   await assertLocation(explicit.stdout, other);
   assert.match(invoke(entry, directory, ['--help']).stdout, /Usage: tl/);
-  assert.equal(invoke(entry, directory, ['--version']).stdout.trim(), '0.1.0');
+  assert.equal(invoke(entry, directory, ['--version']).stdout.trim(), '0.2.0');
+  const history = invoke(entry, directory, ['--repo', nested, 'log', '--limit', '1']);
+  assert.equal(history.status, 0, history.stderr);
+  assert.match(history.stdout, /Initial/);
+  await assertLocation(history.stdout, other);
+  for (const args of [['log', '--limit', '0'], ['log', '--limit', '101'], ['log', '--limit', '1.5'], ['status', '--limit', '2']]) {
+    assert.equal(invoke(entry, other, args).status, 1);
+  }
+  // A non-commit upstream object is a real comparison failure, not a missing repository.
+  const blob = fixtureGit(other, 'rev-parse', 'HEAD:tracked.txt');
+  fixtureGit(other, 'config', 'remote.team.fetch', '+refs/heads/*:refs/remotes/team/*');
+  fixtureGit(other, 'config', 'branch.topic.remote', 'team');
+  fixtureGit(other, 'config', 'branch.topic.merge', 'refs/heads/topic');
+  fixtureGit(other, 'update-ref', 'refs/remotes/team/topic', blob);
+  const partial = invoke(entry, other, ['status']);
+  assert.equal(partial.status, 0, partial.stderr);
+  assert.match(partial.stdout, /HEAD: topic/);
+  assert.match(partial.stdout, /Working tree: clean/);
+  assert.match(partial.stdout, /unavailable/i);
   assert.equal(invoke(entry, directory, ['--repo']).status, 1);
   assert.equal(invoke(entry, directory, ['--unknown']).status, 1);
   assert.match(invoke(entry, directory).stderr, /not a git repository/i);
@@ -67,7 +85,7 @@ test('candidate checkout can be cloned and run without install, build, or node_m
 });
 
 // Terminal-like streams exercise the bundled prompt library, not native OS PTYs.
-test('bundled interactive prompts navigate Overview -> Back -> Exit and restore raw mode', async (t) => {
+test('bundled prompts refresh both views, navigate Back/Exit and restore raw mode', async (t) => {
   const directory = await temp(t);
   const entry = path.join(directory, 'twiglet.cjs');
   await cp(path.join(project, 'dist', 'twiglet.cjs'), entry);
@@ -92,9 +110,21 @@ process.stdout.write = function(chunk, ...args) {
     setTimeout(() => input.write(__KEY__), 30);
   } else if (phase === 1 && text.includes('Navigation')) {
     phase = 2;
-    setTimeout(() => input.write('\r'), 30);
-  } else if (phase === 2 && text.includes('Repository overview')) {
+    setTimeout(() => input.write('\x1b[B\r'), 30);
+  } else if (phase === 2 && text.includes('Navigation')) {
     phase = 3;
+    setTimeout(() => input.write('\r'), 30);
+  } else if (phase === 3 && text.includes('Twiglet')) {
+    phase = 4;
+    setTimeout(() => input.write('\x1b[B\r'), 30);
+  } else if (phase === 4 && text.includes('Navigation')) {
+    phase = 5;
+    setTimeout(() => input.write('\x1b[B\r'), 30);
+  } else if (phase === 5 && text.includes('Navigation')) {
+    phase = 6;
+    setTimeout(() => input.write('\r'), 30);
+  } else if (phase === 6 && text.includes('Twiglet')) {
+    phase = 7;
     setTimeout(() => input.write('\x1b[B\r'), 30);
   }
   return original(chunk, ...args);
@@ -107,7 +137,7 @@ process.on('exit', () => {
     const result = invoke(entry, repo, [], { ...process.env, TERM: 'xterm', NO_COLOR: '1' }, preload);
     assert.equal(result.status, cancel ? 130 : 0, result.stderr + result.stdout);
     assert(!result.stderr.includes('RAW MODE LEAK'));
-    if (!cancel) { assert.match(result.stdout, /Location:/); assert.match(result.stdout, /Navigation/); }
+    if (!cancel) { assert.match(result.stdout, /Location:/); assert.match(result.stdout, /Initial/); assert.match(result.stdout, /Navigation/); }
   }
 });
 

@@ -13,13 +13,40 @@ export interface Change {
   submodule?: string;
 }
 
+export interface UpstreamTarget {
+  ref: string;
+  source: 'local-branch' | 'remote-tracking';
+}
+
+export type Upstream =
+  | { kind: 'none' }
+  | { kind: 'compared'; target: UpstreamTarget; headOid: string; upstreamOid: string; ahead: number; behind: number }
+  | { kind: 'unavailable'; reason: 'detached' | 'unborn' | 'missing-ref' | 'unresolved' | 'shallow' | 'changed-head' | 'error'; message: string; target?: UpstreamTarget; configured?: string };
+
 export interface Overview {
   root: string;
   head: Head;
-  upstream?: string;
+  upstream: Upstream;
   changes: Change[];
   shallow: boolean;
   filtersDisabled: boolean;
+}
+
+export interface CommitSummary {
+  oid: string;
+  parents: string[];
+  subject: string;
+  author: string;
+  committedAt: string;
+}
+
+export interface RecentCommits {
+  root: string;
+  head: Head;
+  commits: CommitSummary[];
+  shallow: boolean;
+  hasMore: boolean;
+  limit: number;
 }
 
 export class RepositoryError extends Error {

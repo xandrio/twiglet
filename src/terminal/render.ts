@@ -1,4 +1,4 @@
-import type { Change, Overview } from '../core/types.js';
+import type { Change, Head, Overview, RecentCommits, Upstream } from '../core/types.js';
 
 /** Repository text is data, never terminal escape sequences. */
 export function safeText(value: string): string {
@@ -13,14 +13,33 @@ export function displayPath(path: Buffer): string {
   return safeText(text);
 }
 
-export function renderOverview(overview: Overview): string {
-  const { head, changes } = overview;
-  const label = head.kind === 'detached' ? `Detached HEAD (${head.oid.slice(0, 12)})`
+function headLabel(head: Head): string {
+  return head.kind === 'detached' ? `Detached HEAD (${head.oid.slice(0, 12)})`
     : head.kind === 'unborn' ? `${safeText(head.name)} (no commits yet)`
     : `${safeText(head.name)} (${head.oid.slice(0, 12)})`;
+}
+
+export function renderUpstream(upstream: Upstream): string[] {
+  if (upstream.kind === 'none') return ['Upstream: not configured'];
+  const target = upstream.target;
+  const name = target ? safeText(target.ref.replace(/^refs\/(heads|remotes)\//, ''))
+    : upstream.kind === 'unavailable' && upstream.configured ? safeText(upstream.configured) : 'unavailable';
+  const lines = [`Upstream: ${name}${target?.source === 'local-branch' ? ' (local branch)' : ''}`];
+  if (upstream.kind === 'compared') {
+    lines.push(upstream.ahead === 0 && upstream.behind === 0 ? 'Matches the local upstream reference.'
+      : `Ahead: ${upstream.ahead} commits   Behind: ${upstream.behind} commits`);
+  } else lines.push(`Comparison unavailable: ${safeText(upstream.message)}`);
+  if (target?.source === 'remote-tracking') {
+    lines.push('Remote-tracking information is local. Remote freshness unknown; no fetch performed.');
+  }
+  return lines;
+}
+
+export function renderOverview(overview: Overview): string {
+  const { head, changes } = overview;
   const lines = [
-    'Repository overview', `Location: ${safeText(overview.root)}`, `HEAD: ${label}`,
-    `Upstream: ${overview.upstream ? safeText(overview.upstream) + ' (local configuration; not refreshed)' : 'not configured'}`,
+    'Repository overview', `Location: ${safeText(overview.root)}`, `HEAD: ${headLabel(head)}`,
+    ...renderUpstream(overview.upstream),
   ];
   if (overview.shallow) lines.push('History: shallow clone; history is incomplete.');
   if (overview.filtersDisabled) lines.push('External clean filters disabled; filtered paths may appear modified.');
@@ -43,5 +62,18 @@ export function renderOverview(overview: Overview): string {
   }
   lines.push('', 'Untracked directories are grouped. A path can be both staged and unstaged.',
     'Submodule worktrees are not inspected. No fetch is performed.');
+  return lines.join('\n') + '\n';
+}
+
+export function renderHistory(history: RecentCommits): string {
+  const lines = ['Recent commits', `Location: ${safeText(history.root)}`, `HEAD: ${headLabel(history.head)}`,
+    'History reachable from this HEAD, including merges. Dates are commit dates.', ''];
+  if (history.head.kind === 'unborn') lines.push('No commits yet.');
+  for (const commit of history.commits) {
+    lines.push(`${commit.oid.slice(0, 12)} ${safeText(commit.subject) || '(no subject)'}`,
+      `  ${safeText(commit.author)} | ${commit.committedAt}${commit.parents.length > 1 ? ' | merge' : ''}`);
+  }
+  if (history.hasMore) lines.push(`\nShowing ${history.limit} commits; more are available. Use tl log --limit N (up to 100).`);
+  if (history.shallow) lines.push('\nShallow repository: only locally available history is shown.');
   return lines.join('\n') + '\n';
 }
