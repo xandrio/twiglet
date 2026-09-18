@@ -1,0 +1,23 @@
+{
+  "name": "twiglet",
+  "version": "0.1.0",
+  "private": true,
+  "description": "A small interactive Git repository companion",
+  "type": "module",
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "dev": "tsx src/cli.ts",
+    "build": "node scripts/build.mjs",
+    "check:dist": "node scripts/build.mjs --check",
+    "typecheck": "tsc --noEmit",
+    "test": "tsx --test test/*.test.ts",
+    "check": "npm run typecheck && npm run check:dist && npm test"
+  },
+  "dependencies": { "@inquirer/select": "4.4.2" },
+  "devDependencies": {
+    "@types/node": "22.19.15",
+    "esbuild": "0.28.2",
+    "tsx": "4.23.13",
+    "typescript": "5.9.3"
+  }
+}

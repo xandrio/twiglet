@@ -1,0 +1,108 @@
+import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
+import { cp, mkdir, readFile, stat, writeFile } from 'node:fs/promises';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import test from 'node:test';
+import { fixtureGit, repository, temp } from './helpers.js';
+
+const project = fileURLToPath(new URL('../', import.meta.url));
+function invoke(entry: string, cwd: string, args: string[] = [], env = process.env, preload?: string) {
+  return spawnSync(process.execPath, [...(preload ? ['--require', preload] : []), entry, ...args], {
+    cwd, env, encoding: 'utf8', timeout: 10_000, windowsHide: true,
+  });
+}
+
+test('candidate checkout can be cloned and run without install, build, or node_modules', async (t) => {
+  const directory = await temp(t);
+  const candidate = path.join(directory, 'candidate');
+  const checkout = path.join(directory, 'fresh clone é');
+  await mkdir(candidate);
+  // Commit only in a disposable fixture; the developer checkout and its index stay untouched.
+  for (const name of ['src', 'scripts', 'test', 'dist', 'package.json', 'package-lock.json', 'tsconfig.json', 'README.md', 'AGENTS.md', '.gitignore', '.gitattributes']) {
+    await cp(path.join(project, name), path.join(candidate, name), { recursive: true });
+  }
+  fixtureGit(candidate, 'init', '--initial-branch=topic');
+  fixtureGit(candidate, 'add', '.');
+  fixtureGit(candidate, 'commit', '-m', 'Candidate checkout');
+  fixtureGit(directory, 'clone', '--no-hardlinks', candidate, checkout);
+  await assert.rejects(stat(path.join(checkout, 'node_modules')), { code: 'ENOENT' });
+  const before = fixtureGit(checkout, 'status', '--porcelain');
+  const entry = path.join(checkout, 'dist', 'twiglet.cjs');
+  const other = await repository(t);
+  const direct = invoke(entry, other);
+  assert.equal(direct.status, 0, direct.stderr);
+  assert.match(direct.stdout, /Repository overview/);
+  assert.match(direct.stdout, /HEAD: topic/);
+  assert(direct.stdout.includes(other.replaceAll('\\', '/')) || direct.stdout.includes(other));
+  assert(!direct.stdout.includes('\x1b'));
+  assert.equal(invoke(entry, checkout, ['status']).status, 0);
+  assert.equal(invoke(entry, directory, ['--repo', other, 'status']).status, 0);
+  assert.match(invoke(entry, directory, ['--help']).stdout, /Usage: tl/);
+  assert.equal(invoke(entry, directory, ['--version']).stdout.trim(), '0.1.0');
+  assert.equal(invoke(entry, directory, ['--repo']).status, 1);
+  assert.equal(invoke(entry, directory, ['--unknown']).status, 1);
+  assert.match(invoke(entry, directory).stderr, /not a git repository/i);
+  const injected = invoke(entry, other, [], { ...process.env, GIT_DIR: path.join(checkout, '.git'), GIT_WORK_TREE: checkout });
+  assert.equal(injected.status, 0, injected.stderr);
+  assert(injected.stdout.includes(other.replaceAll('\\', '/')) || injected.stdout.includes(other));
+  const noGit = Object.fromEntries(Object.entries(process.env).filter(([key]) => key.toUpperCase() !== 'PATH'));
+  noGit.PATH = directory;
+  const missing = invoke(entry, other, [], noGit);
+  assert.equal(missing.status, 1);
+  assert.match(missing.stderr, /Could not start Git/);
+  assert.equal(fixtureGit(checkout, 'status', '--porcelain'), before);
+});
+
+// Terminal-like streams exercise the bundled prompt library, not native OS PTYs.
+test('bundled interactive prompts navigate Overview -> Back -> Exit and restore raw mode', async (t) => {
+  const directory = await temp(t);
+  const entry = path.join(directory, 'twiglet.cjs');
+  await cp(path.join(project, 'dist', 'twiglet.cjs'), entry);
+  const repo = await repository(t);
+  for (const cancel of [false, true]) {
+    const preload = path.join(directory, 'terminal.cjs');
+    const boot = String.raw`
+const { PassThrough } = require('node:stream');
+const input = new PassThrough();
+input.isTTY = true;
+input.isRaw = false;
+input.setRawMode = (raw) => { input.isRaw = raw; return input; };
+Object.defineProperty(process, 'stdin', { value: input });
+Object.defineProperty(process.stdout, 'isTTY', { value: true });
+process.stdout.columns = 100;
+const original = process.stdout.write.bind(process.stdout);
+let phase = 0;
+process.stdout.write = function(chunk, ...args) {
+  const text = String(chunk).replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, '');
+  if (phase === 0 && text.includes('Repository overview')) {
+    phase = 1;
+    setTimeout(() => input.write(__KEY__), 30);
+  } else if (phase === 1 && text.includes('Navigation')) {
+    phase = 2;
+    setTimeout(() => input.write('\r'), 30);
+  } else if (phase === 2 && text.includes('Repository overview')) {
+    phase = 3;
+    setTimeout(() => input.write('\x1b[B\r'), 30);
+  }
+  return original(chunk, ...args);
+};
+process.on('exit', () => {
+  if (input.isRaw) { process.stderr.write('RAW MODE LEAK'); process.exitCode = 9; }
+});
+`;
+    await writeFile(preload, boot.replace('__KEY__', JSON.stringify(cancel ? '\u0003' : '\r')));
+    const result = invoke(entry, repo, [], { ...process.env, TERM: 'xterm', NO_COLOR: '1' }, preload);
+    assert.equal(result.status, cancel ? 130 : 0, result.stderr + result.stdout);
+    assert(!result.stderr.includes('RAW MODE LEAK'));
+    if (!cancel) { assert.match(result.stdout, /Location:/); assert.match(result.stdout, /Navigation/); }
+  }
+});
+
+test('distribution includes notices and no absolute development paths', async () => {
+  const bundle = await readFile(path.join(project, 'dist', 'twiglet.cjs'), 'utf8');
+  const notices = await readFile(path.join(project, 'dist', 'THIRD_PARTY_NOTICES.txt'), 'utf8');
+  assert.match(notices, /@inquirer\/select/);
+  assert.match(notices, /Permission is hereby granted/);
+  assert(!bundle.includes(project));
+});

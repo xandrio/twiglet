@@ -10,10 +10,41 @@ interface later. It is exploratory: repository state, recent commits, branch
 history, branch differences, and local/remote divergence are initial ideas, not a
 closed specification.
 
-At this stage the repository has documentation only. No application architecture,
-language, framework, package manager, or test/build commands have been chosen.
-Do not treat these gaps as permission to scaffold an application. Architecture is
-a separate discussion and should receive human review before implementation.
+## Approved architecture and distribution
+
+- Use TypeScript/Node and installed Git, with a single npm package and lockfile.
+  The maintainer's TypeScript familiarity is a significant maintenance constraint.
+- Keep reusable repository types and operations in `src/core`, Git execution and
+  parsing in `src/git`, and interactive navigation/rendering in `src/terminal`.
+  `src/cli.ts` owns arguments and process-level behavior. Core code must not prompt,
+  print, change global working directories, or exit the process.
+- The primary experience is `tl` -> menu -> Repository overview -> Back -> Exit.
+  Build this vertical slice early, not after a large noninteractive backend phase.
+- Call Git with argument arrays, never shell commands. Inspection must neither
+  mutate repositories nor contact remotes. Account for optional index writes,
+  partial-clone lazy fetching, external helpers, and inherited Git environment.
+- Commit the generated directly runnable JavaScript distribution and required
+  third-party notices alongside source. No target-machine npm install, build,
+  node_modules, new runtime, standalone executable, or runtime download is allowed.
+  Development machines may use normal npm dependencies and build/test tooling.
+- Rebuild distribution with runtime changes and verify deterministic output in CI.
+  Test the actual artifact in isolation without node_modules, not just source.
+- A richer TUI and likely Electron/web desktop are future possibilities. Keep UI
+  boundaries clean without adding desktop code, RPC, or a framework in anticipation.
+- The primary target Node version has not yet been supplied: the initial value was
+  a placeholder. Document the supported floor and versions actually validated;
+  do not claim target-machine compatibility until its version is known.
+
+Current runtime floor: Node 22. Development: `npm ci`, `npm run dev`.
+After runtime changes: `npm run build`, then `npm run check` (typecheck, distribution
+freshness, and tests). Commit generated `dist/` files with source. The target
+machine runs `node /path/to/twiglet/dist/twiglet.cjs` with no preparation.
+
+The first overview deliberately excludes submodule worktrees, rejects partial-clone
+configuration, and disables external clean/process filters (which may make filtered
+paths appear modified). Do not remove these guards without preserving offline,
+non-mutating inspection. Interactive errors allow Back/Exit; noninteractive errors
+exit 1. The CI matrix is a validation plan, not evidence of a completed platform run.
 
 ## Collaboration and decisions
 
@@ -52,10 +83,11 @@ a separate discussion and should receive human review before implementation.
 
 ## Validation and handoff
 
-Inspect existing files and tooling before making changes. Once implementation
-exists, use the repository's documented build and test commands and add meaningful
-coverage appropriate to the behavior changed. For documentation-only edits, check
-accuracy, consistency, links, and the diff; no application tests currently exist.
+Inspect existing files and tooling before making changes. Use the repository's
+documented build and test commands and add meaningful coverage appropriate to the
+behavior changed. Use real Git in isolated temporary repositories for semantic
+tests and keep terminal behavior separately testable. For documentation-only
+edits, check accuracy, consistency, links, and the diff.
 
 Report what changed, the validation performed, and any remaining limitations.
 Distinguish checks actually run from expectations, especially for platforms you
