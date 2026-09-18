@@ -2022,6 +2022,30 @@ async function readBranchDetails(directory, name, signal, run = runGit) {
   return { root, branch, shallow, upstream, history };
 }
 
+// src/terminal/style.ts
+function createStyle(enabled) {
+  const wrap = (open, close) => (text) => enabled && text ? `\x1B[${open}m${text}\x1B[${close}m` : text;
+  const bold = wrap(1, 22);
+  const cyan = wrap(36, 39);
+  return {
+    heading: bold,
+    branch: (text) => bold(cyan(text)),
+    ref: cyan,
+    subject: bold,
+    author: wrap(35, 39),
+    hash: wrap(33, 39),
+    muted: wrap(2, 22),
+    good: wrap(32, 39),
+    warning: wrap(33, 39),
+    error: wrap(31, 39),
+    selection: (text) => bold(cyan(text))
+  };
+}
+var plain = createStyle(false);
+function outputStyle(stream, env = process.env) {
+  return createStyle(Boolean(stream.isTTY) && env.TERM !== "dumb" && !env.NO_COLOR && env.FORCE_COLOR !== "0");
+}
+
 // src/terminal/render.ts
 function safeText(value) {
   return value.replace(
@@ -2034,32 +2058,32 @@ function displayPath(path) {
   if (!Buffer.from(text).equals(path)) return `[path bytes: ${path.toString("hex")}]`;
   return safeText(text);
 }
-function headLabel(head) {
-  return head.kind === "detached" ? `Detached HEAD (${head.oid.slice(0, 12)})` : head.kind === "unborn" ? `${safeText(head.name)} (no commits yet)` : `${safeText(head.name)} (${head.oid.slice(0, 12)})`;
+function headLabel(head, style) {
+  return head.kind === "detached" ? `${style.warning("Detached HEAD")} (${style.hash(head.oid.slice(0, 12))})` : head.kind === "unborn" ? `${style.branch(safeText(head.name))} (no commits yet)` : `${style.branch(safeText(head.name))} (${style.hash(head.oid.slice(0, 12))})`;
 }
-function renderUpstream(upstream) {
-  if (upstream.kind === "none") return ["Upstream: not configured"];
+function renderUpstream(upstream, style = plain) {
+  if (upstream.kind === "none") return [`Upstream: ${style.muted("not configured")}`];
   const target = upstream.target;
-  const name = target ? safeText(target.ref.replace(/^refs\/(heads|remotes)\//, "")) : upstream.kind === "unavailable" && upstream.configured ? safeText(upstream.configured) : "unavailable";
-  const lines = [`Upstream: ${name}${target?.source === "local-branch" ? " (local branch)" : ""}`];
+  const name = target ? safeText(target.ref) : upstream.kind === "unavailable" && upstream.configured ? safeText(upstream.configured) : "unavailable";
+  const lines = [`Upstream: ${style.ref(name)}${target?.source === "local-branch" ? " (local branch)" : ""}`];
   if (upstream.kind === "compared") {
-    lines.push(upstream.ahead === 0 && upstream.behind === 0 ? "Matches the local upstream reference." : `Ahead: ${upstream.ahead} commits   Behind: ${upstream.behind} commits`);
-  } else lines.push(`Comparison unavailable: ${safeText(upstream.message)}`);
+    lines.push(upstream.ahead === 0 && upstream.behind === 0 ? style.good("Matches the local upstream reference.") : `Ahead: ${style.heading(String(upstream.ahead))} commits   Behind: ${style.heading(String(upstream.behind))} commits`);
+  } else lines.push(style.warning(`Comparison unavailable: ${safeText(upstream.message)}`));
   if (target?.source === "remote-tracking") {
     lines.push("Remote-tracking information is local. Remote freshness unknown; no fetch performed.");
   }
   return lines;
 }
-function renderOverview(overview) {
+function renderOverview(overview, style = plain) {
   const { head, changes } = overview;
   const lines = [
-    "Repository overview",
+    style.heading("Repository overview"),
     `Location: ${safeText(overview.root)}`,
-    `HEAD: ${headLabel(head)}`,
-    ...renderUpstream(overview.upstream)
+    `HEAD: ${headLabel(head, style)}`,
+    ...renderUpstream(overview.upstream, style)
   ];
-  if (overview.shallow) lines.push("History: shallow clone; history is incomplete.");
-  if (overview.filtersDisabled) lines.push("External clean filters disabled; filtered paths may appear modified.");
+  if (overview.shallow) lines.push(style.warning("History: shallow clone; history is incomplete."));
+  if (overview.filtersDisabled) lines.push(style.warning("External clean filters disabled; filtered paths may appear modified."));
   lines.push("");
   const groups = [
     ["Conflicts", changes.filter((c) => c.kind === "conflict")],
@@ -2067,13 +2091,14 @@ function renderOverview(overview) {
     ["Unstaged", changes.filter((c) => c.kind !== "conflict" && c.kind !== "untracked" && c.worktree !== ".")],
     ["Untracked", changes.filter((c) => c.kind === "untracked")]
   ];
-  if (!changes.length) lines.push("Working tree: clean (excluding submodule contents).");
+  if (!changes.length) lines.push(`Working tree: ${style.good("clean")} (excluding submodule contents).`);
   for (const [title, entries] of groups) {
     if (!entries.length) continue;
-    lines.push(`${title}: ${entries.length} ${entries.length === 1 ? "entry" : "entries"}`);
+    const emphasize = title === "Conflicts" ? style.error : title === "Staged" ? style.good : style.warning;
+    lines.push(emphasize(`${title}: ${entries.length} ${entries.length === 1 ? "entry" : "entries"}`));
     for (const entry of entries.slice(0, 30)) {
       const from = entry.originalPath ? `${displayPath(entry.originalPath)} -> ` : "";
-      lines.push(`  ${entry.index}${entry.worktree} ${from}${displayPath(entry.path)}`);
+      lines.push(`  ${emphasize(entry.index + entry.worktree)} ${from}${displayPath(entry.path)}`);
     }
     if (entries.length > 30) lines.push(`  ... ${entries.length - 30} more entries`);
   }
@@ -2084,66 +2109,69 @@ function renderOverview(overview) {
   );
   return lines.join("\n") + "\n";
 }
-function renderHistory(history) {
+function renderCommit(commit, style = plain) {
+  return [
+    `${style.hash(commit.oid.slice(0, 12))} ${style.subject(safeText(commit.subject) || "(no subject)")}`,
+    `  ${style.author(safeText(commit.author))} | ${style.muted(safeText(commit.committedAt))}${commit.parents.length > 1 ? " | merge" : ""}`
+  ];
+}
+function renderHistory(history, style = plain) {
   const lines = [
-    "Recent commits",
+    style.heading("Recent commits"),
     `Location: ${safeText(history.root)}`,
-    `HEAD: ${headLabel(history.head)}`,
+    `HEAD: ${headLabel(history.head, style)}`,
     "History reachable from this HEAD, including merges. Dates are commit dates.",
     ""
   ];
   if (history.head.kind === "unborn") lines.push("No commits yet.");
   for (const commit of history.commits) {
-    lines.push(
-      `${commit.oid.slice(0, 12)} ${safeText(commit.subject) || "(no subject)"}`,
-      `  ${safeText(commit.author)} | ${commit.committedAt}${commit.parents.length > 1 ? " | merge" : ""}`
-    );
+    lines.push(...renderCommit(commit, style));
   }
   if (history.hasMore) lines.push(`
 Showing ${history.limit} commits; more are available. Use tl log --limit N (up to 100).`);
-  if (history.shallow) lines.push("\nShallow repository: only locally available history is shown.");
+  if (history.shallow) lines.push("\n" + style.warning("Shallow repository: only locally available history is shown."));
   return lines.join("\n") + "\n";
 }
 
 // src/terminal/branches.ts
-function trackingLabel(branch) {
+function trackingLabel(branch, style) {
   const tracking = branch.tracking;
-  if (tracking.kind === "none") return "no upstream";
-  if (tracking.kind === "unavailable") return `tracking unavailable: ${safeText(tracking.message)}`;
-  return `${safeText(tracking.target.ref)}${tracking.target.source === "local-branch" ? " (local branch)" : ""}${tracking.available ? "" : " (missing locally)"}`;
+  if (tracking.kind === "none") return style.muted("no upstream");
+  if (tracking.kind === "unavailable") return style.warning(`tracking unavailable: ${safeText(tracking.message)}`);
+  return `${style.ref(safeText(tracking.target.ref))}${tracking.target.source === "local-branch" ? " (local branch)" : ""}${tracking.available ? "" : style.warning(" (missing locally)")}`;
 }
-function branchChoice(branch) {
+function branchChoice(branch, style = plain) {
   const subject = safeText(branch.tip?.subject ?? "No commits yet");
-  return `${branch.current ? "* " : ""}${safeText(branch.name)} | ${branch.tip?.committedAt.slice(0, 10) ?? "unborn"} | ${subject.length > 50 ? subject.slice(0, 47) + "..." : subject} | ${trackingLabel(branch)}`;
+  return `${branch.current ? style.good("* ") : ""}${style.branch(safeText(branch.name))} | ${style.muted(safeText(branch.tip?.committedAt.slice(0, 10) ?? "unborn"))} | ${style.subject(subject.length > 50 ? subject.slice(0, 47) + "..." : subject)} | ${trackingLabel(branch, style)}`;
 }
-function renderBranchContext(list) {
-  return `Local branches
+function renderBranchContext(list, style = plain) {
+  return `${style.heading("Local branches")}
 Location: ${safeText(list.root)}
-${list.head.kind === "detached" ? "HEAD is detached." : `Current branch: ${safeText(list.head.name)}`}
+${list.head.kind === "detached" ? style.warning("HEAD is detached.") : `Current branch: ${style.branch(safeText(list.head.name))}`}
 * Current in this worktree. Dates are tip commit dates, not branch usage dates.
 Remote-tracking information is local; remote freshness unknown. No fetch performed.
 `;
 }
-function renderBranches(list) {
-  return renderBranchContext(list) + "\n" + (list.branches.length ? list.branches.map(branchChoice).join("\n") : "No local branches.") + "\n";
+function renderBranches(list, style = plain) {
+  return renderBranchContext(list, style) + "\n" + (list.branches.length ? list.branches.map((branch) => branchChoice(branch, style)).join("\n") : "No local branches.") + "\n";
 }
-function renderBranchDetails(details) {
+function renderBranchDetails(details, style = plain) {
   const { branch, history } = details;
   const lines = [
-    "Branch details",
+    style.heading("Branch details"),
     `Location: ${safeText(details.root)}`,
-    `Branch: ${safeText(branch.name)}${branch.current ? " (current in this worktree)" : ""}`,
+    `Branch: ${style.branch(safeText(branch.name))}${branch.current ? " (current in this worktree)" : ""}`,
     "Inspection only; no branch is checked out and no working-tree status is shown."
   ];
-  if (branch.tip) lines.push(`Tip: ${branch.tip.oid}`, `Subject: ${safeText(branch.tip.subject)}`, `Author: ${safeText(branch.tip.author)}`, `Tip commit date: ${branch.tip.committedAt}`);
+  if (branch.tip) lines.push(`Tip: ${style.hash(branch.tip.oid)}`, `Subject: ${style.subject(safeText(branch.tip.subject))}`, `Author: ${style.author(safeText(branch.tip.author))}`, `Tip commit date: ${style.muted(safeText(branch.tip.committedAt))}`);
   else lines.push("No commits yet.");
-  lines.push(...renderUpstream(details.upstream), "", "Recent commits reachable from this branch, including merges:");
-  if (history.kind === "unavailable") lines.push(`History unavailable: ${safeText(history.message)}`);
+  lines.push(...renderUpstream(details.upstream, style), "", style.heading("Recent commits reachable from this branch, including merges:"));
+  if (history.kind === "unavailable") lines.push(style.warning(`History unavailable: ${safeText(history.message)}`));
   else {
-    for (const commit of history.commits) lines.push(`${commit.oid.slice(0, 12)} ${safeText(commit.subject) || "(no subject)"}`, `  ${safeText(commit.author)} | ${commit.committedAt}${commit.parents.length > 1 ? " | merge" : ""}`);
+    for (const commit of history.commits) lines.push(...renderCommit(commit, style));
     if (history.hasMore) lines.push("Showing the latest 20 reachable commits; more are available.");
   }
-  if (details.shallow) lines.push("Shallow repository: history is incomplete.");
+  if (details.shallow) lines.push(style.warning("Shallow repository: history is incomplete."));
   return lines.join("\n") + "\n";
 }
 
@@ -3455,7 +3483,9 @@ var esm_default2 = createPrompt((config, done) => {
 
 // src/terminal/prompt.ts
 function createTerminal(signal) {
+  const style = outputStyle(process.stdout);
   return {
+    style,
     write: (text) => {
       process.stdout.write(text);
     },
@@ -3464,7 +3494,17 @@ function createTerminal(signal) {
       choices,
       loop: false,
       ...defaultValue ? { default: defaultValue } : {},
-      theme: { prefix: "?", icon: { cursor: ">" } }
+      // Keep choice names plain for Inquirer's prefix matching; emphasize the
+      // active row at render time rather than injecting ANSI into searchable data.
+      theme: { prefix: "?", icon: { cursor: ">" }, style: {
+        message: style.heading,
+        answer: style.ref,
+        highlight: style.selection,
+        error: style.error,
+        help: style.muted,
+        description: style.muted,
+        keysHelpTip: (keys) => keys.map(([key, action]) => `${style.heading(key)} ${style.muted(action)}`).join(" • ")
+      } }
     }, { signal })
   };
 }
@@ -3474,17 +3514,16 @@ function isCancellation(error) {
   return error instanceof Error && ["ExitPromptError", "AbortPromptError", "CancelPromptError"].includes(error.name);
 }
 async function branchSession(terminal, operations, signal) {
+  const style = terminal.style ?? plain;
   let selected;
   while (!signal?.aborted) {
     let list;
     try {
       list = await operations.branches();
-      terminal.write("\n" + renderBranchContext(list));
+      terminal.write("\n" + renderBranchContext(list, style));
     } catch (error) {
       if (signal?.aborted) return;
-      terminal.write(`
-Unable to list branches: ${safeText(error instanceof Error ? error.message : String(error))}
-`);
+      terminal.write("\n" + style.error(`Unable to list branches: ${safeText(error instanceof Error ? error.message : String(error))}`) + "\n");
       if (await terminal.choose("Navigation", [{ name: "Back", value: "back" }, { name: "Refresh", value: "refresh" }]) === "back") return;
       continue;
     }
@@ -3497,13 +3536,12 @@ Unable to list branches: ${safeText(error instanceof Error ? error.message : Str
     const branch = list.branches.find((b) => b.ref === choice);
     let action = "refresh";
     while (action === "refresh" && !signal?.aborted) {
-      terminal.write("\nInspecting branch...\n");
+      terminal.write("\n" + style.muted("Inspecting branch...") + "\n");
       try {
-        terminal.write(renderBranchDetails(await operations.branch(branch.name)));
+        terminal.write(renderBranchDetails(await operations.branch(branch.name), style));
       } catch (error) {
         if (signal?.aborted) return;
-        terminal.write(`Unable to inspect branch: ${safeText(error instanceof Error ? error.message : String(error))}
-`);
+        terminal.write(style.error(`Unable to inspect branch: ${safeText(error instanceof Error ? error.message : String(error))}`) + "\n");
       }
       if (signal?.aborted) return;
       action = await terminal.choose("Navigation", [{ name: "Back", value: "back" }, { name: "Refresh", value: "refresh" }]);
@@ -3511,6 +3549,7 @@ Unable to list branches: ${safeText(error instanceof Error ? error.message : Str
   }
 }
 async function interactiveSession(terminal, operations, signal) {
+  const style = terminal.style ?? plain;
   let selected = "overview";
   while (!signal?.aborted) {
     const action = await terminal.choose("Twiglet", [
@@ -3527,14 +3566,12 @@ async function interactiveSession(terminal, operations, signal) {
     }
     let navigation = "refresh";
     while (navigation === "refresh" && !signal?.aborted) {
-      terminal.write("\nInspecting repository...\n");
+      terminal.write("\n" + style.muted("Inspecting repository...") + "\n");
       try {
-        terminal.write("\n" + (action === "history" ? renderHistory(await operations.history()) : renderOverview(await operations.overview())));
+        terminal.write("\n" + (action === "history" ? renderHistory(await operations.history(), style) : renderOverview(await operations.overview(), style)));
       } catch (error) {
         if (signal?.aborted) return;
-        terminal.write(`
-Unable to inspect repository: ${safeText(error instanceof Error ? error.message : String(error))}
-`);
+        terminal.write("\n" + style.error(`Unable to inspect repository: ${safeText(error instanceof Error ? error.message : String(error))}`) + "\n");
       }
       if (signal?.aborted) return;
       navigation = await terminal.choose("Navigation", [{ name: "Back", value: "back" }, { name: "Refresh", value: "refresh" }]);
@@ -3598,6 +3635,7 @@ async function main() {
   process.on("SIGINT", interrupt);
   process.on("SIGTERM", interrupt);
   const wasRaw = process.stdin.isRaw ?? false;
+  const style = outputStyle(process.stdout);
   try {
     const operations = {
       overview: () => readOverview(directory, abort.signal),
@@ -3606,13 +3644,13 @@ async function main() {
       branch: (name) => readBranchDetails(directory, name, abort.signal)
     };
     if (command === "branches") {
-      process.stdout.write(renderBranches(await operations.branches()));
+      process.stdout.write(renderBranches(await operations.branches(), style));
     } else if (command === "branch") {
-      process.stdout.write(renderBranchDetails(await operations.branch(branchName)));
+      process.stdout.write(renderBranchDetails(await operations.branch(branchName), style));
     } else if (command === "log") {
-      process.stdout.write(renderHistory(await operations.history()));
+      process.stdout.write(renderHistory(await operations.history(), style));
     } else if (command === "status" || !process.stdin.isTTY || !process.stdout.isTTY || process.env.TERM === "dumb") {
-      process.stdout.write(renderOverview(await operations.overview()));
+      process.stdout.write(renderOverview(await operations.overview(), style));
     } else {
       await interactiveSession(createTerminal(abort.signal), operations, abort.signal);
     }
@@ -3627,7 +3665,6 @@ async function main() {
   }
 }
 main().catch((error) => {
-  process.stderr.write(`Twiglet: ${safeText(error instanceof Error ? error.message : String(error))}
-`);
+  process.stderr.write(outputStyle(process.stderr).error(`Twiglet: ${safeText(error instanceof Error ? error.message : String(error))}`) + "\n");
   process.exitCode = 1;
 });

@@ -1,9 +1,12 @@
 import type { BranchDetails, BranchList, Overview, RecentCommits } from '../core/types.js';
 import { branchChoice, renderBranchContext, renderBranchDetails } from './branches.js';
 import { renderHistory, renderOverview, safeText } from './render.js';
+import { plain } from './style.js';
+import type { Style } from './style.js';
 
 export interface Choice { name: string; value: string }
 export interface Terminal {
+  style?: Style;
   choose(message: string, choices: Choice[], defaultValue?: string): Promise<string>;
   write(text: string): void;
 }
@@ -20,15 +23,16 @@ export interface RepositoryOperations {
 }
 
 async function branchSession(terminal: Terminal, operations: RepositoryOperations, signal?: AbortSignal): Promise<void> {
+  const style = terminal.style ?? plain;
   let selected: string | undefined;
   while (!signal?.aborted) {
     let list: BranchList;
     try {
       list = await operations.branches();
-      terminal.write('\n' + renderBranchContext(list));
+      terminal.write('\n' + renderBranchContext(list, style));
     } catch (error) {
       if (signal?.aborted) return;
-      terminal.write(`\nUnable to list branches: ${safeText(error instanceof Error ? error.message : String(error))}\n`);
+      terminal.write('\n' + style.error(`Unable to list branches: ${safeText(error instanceof Error ? error.message : String(error))}`) + '\n');
       if (await terminal.choose('Navigation', [{ name: 'Back', value: 'back' }, { name: 'Refresh', value: 'refresh' }]) === 'back') return;
       continue;
     }
@@ -41,11 +45,11 @@ async function branchSession(terminal: Terminal, operations: RepositoryOperation
     const branch = list.branches.find((b) => b.ref === choice)!;
     let action = 'refresh';
     while (action === 'refresh' && !signal?.aborted) {
-      terminal.write('\nInspecting branch...\n');
-      try { terminal.write(renderBranchDetails(await operations.branch(branch.name))); }
+      terminal.write('\n' + style.muted('Inspecting branch...') + '\n');
+      try { terminal.write(renderBranchDetails(await operations.branch(branch.name), style)); }
       catch (error) {
         if (signal?.aborted) return;
-        terminal.write(`Unable to inspect branch: ${safeText(error instanceof Error ? error.message : String(error))}\n`);
+        terminal.write(style.error(`Unable to inspect branch: ${safeText(error instanceof Error ? error.message : String(error))}`) + '\n');
       }
       if (signal?.aborted) return;
       action = await terminal.choose('Navigation', [{ name: 'Back', value: 'back' }, { name: 'Refresh', value: 'refresh' }]);
@@ -54,6 +58,7 @@ async function branchSession(terminal: Terminal, operations: RepositoryOperation
 }
 
 export async function interactiveSession(terminal: Terminal, operations: RepositoryOperations, signal?: AbortSignal): Promise<void> {
+  const style = terminal.style ?? plain;
   let selected = 'overview';
   while (!signal?.aborted) {
     const action = await terminal.choose('Twiglet', [
@@ -65,12 +70,12 @@ export async function interactiveSession(terminal: Terminal, operations: Reposit
     if (action === 'branches') { await branchSession(terminal, operations, signal); continue; }
     let navigation = 'refresh';
     while (navigation === 'refresh' && !signal?.aborted) {
-      terminal.write('\nInspecting repository...\n');
+      terminal.write('\n' + style.muted('Inspecting repository...') + '\n');
       try {
-        terminal.write('\n' + (action === 'history' ? renderHistory(await operations.history()) : renderOverview(await operations.overview())));
+        terminal.write('\n' + (action === 'history' ? renderHistory(await operations.history(), style) : renderOverview(await operations.overview(), style)));
       } catch (error) {
         if (signal?.aborted) return;
-        terminal.write(`\nUnable to inspect repository: ${safeText(error instanceof Error ? error.message : String(error))}\n`);
+        terminal.write('\n' + style.error(`Unable to inspect repository: ${safeText(error instanceof Error ? error.message : String(error))}`) + '\n');
       }
       if (signal?.aborted) return;
       navigation = await terminal.choose('Navigation', [{ name: 'Back', value: 'back' }, { name: 'Refresh', value: 'refresh' }]);

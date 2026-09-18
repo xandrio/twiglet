@@ -104,7 +104,7 @@ test('bundled prompts refresh overview, history and branches, navigate Back/Exit
   const entry = path.join(directory, 'twiglet.cjs');
   await cp(path.join(project, 'dist', 'twiglet.cjs'), entry);
   const repo = await repository(t);
-  for (const cancel of [false, true]) {
+  for (const [cancel, color] of [[false, false], [true, false], [false, true]]) {
     const preload = path.join(directory, 'terminal.cjs');
     const boot = String.raw`
 const { PassThrough } = require('node:stream');
@@ -163,9 +163,10 @@ process.on('exit', () => {
 });
 `;
     await writeFile(preload, boot.replace('__KEY__', JSON.stringify(cancel ? '\u0003' : '\r')));
-    const result = invoke(entry, repo, [], { ...process.env, TERM: 'xterm', NO_COLOR: '1' }, preload);
+    const result = invoke(entry, repo, [], { ...process.env, TERM: 'xterm', NO_COLOR: color ? '' : '1', FORCE_COLOR: color ? '1' : '0' }, preload);
     assert.equal(result.status, cancel ? 130 : 0, result.stderr + result.stdout);
     assert(!result.stderr.includes('RAW MODE LEAK'));
+    assert.equal(/\x1b\[\d+(?:;\d+)*m/.test(result.stdout), Boolean(color));
     if (!cancel) { assert.match(result.stdout, /Location:/); assert.match(result.stdout, /Initial/); assert.match(result.stdout, /Branch details/); }
   }
 });

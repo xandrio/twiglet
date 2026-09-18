@@ -5,6 +5,7 @@ import { renderBranches, renderBranchDetails } from './terminal/branches.js';
 import { createTerminal } from './terminal/prompt.js';
 import { interactiveSession, isCancellation } from './terminal/session.js';
 import { renderHistory, renderOverview, safeText } from './terminal/render.js';
+import { outputStyle } from './terminal/style.js';
 
 const help = `Twiglet 0.3.0 - a small Git repository companion
 
@@ -61,6 +62,7 @@ async function main(): Promise<void> {
   process.on('SIGINT', interrupt);
   process.on('SIGTERM', interrupt);
   const wasRaw = process.stdin.isRaw ?? false;
+  const style = outputStyle(process.stdout);
   try {
     const operations = {
       overview: () => readOverview(directory, abort.signal),
@@ -69,13 +71,13 @@ async function main(): Promise<void> {
       branch: (name: string) => readBranchDetails(directory, name, abort.signal),
     };
     if (command === 'branches') {
-      process.stdout.write(renderBranches(await operations.branches()));
+      process.stdout.write(renderBranches(await operations.branches(), style));
     } else if (command === 'branch') {
-      process.stdout.write(renderBranchDetails(await operations.branch(branchName!)));
+      process.stdout.write(renderBranchDetails(await operations.branch(branchName!), style));
     } else if (command === 'log') {
-      process.stdout.write(renderHistory(await operations.history()));
+      process.stdout.write(renderHistory(await operations.history(), style));
     } else if (command === 'status' || !process.stdin.isTTY || !process.stdout.isTTY || process.env.TERM === 'dumb') {
-      process.stdout.write(renderOverview(await operations.overview()));
+      process.stdout.write(renderOverview(await operations.overview(), style));
     } else {
       await interactiveSession(createTerminal(abort.signal), operations, abort.signal);
     }
@@ -91,6 +93,6 @@ async function main(): Promise<void> {
 }
 
 main().catch((error: unknown) => {
-  process.stderr.write(`Twiglet: ${safeText(error instanceof Error ? error.message : String(error))}\n`);
+  process.stderr.write(outputStyle(process.stderr).error(`Twiglet: ${safeText(error instanceof Error ? error.message : String(error))}`) + '\n');
   process.exitCode = 1;
 });

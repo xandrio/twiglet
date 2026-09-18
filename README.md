@@ -44,6 +44,11 @@ or **Local branches**. Select a branch to inspect it without checking it out.
 with your previous selection retained. **Exit** closes Twiglet. Ctrl-C cancels and
 restores the terminal.
 
+Terminal output uses subtle emphasis for branches, commits, metadata, and diagnostics.
+Redirected output stays plain; `NO_COLOR=1`, `TERM=dumb`, or `FORCE_COLOR=0` disables
+styling. Color supplements the existing labels and markers; full upstream refs and
+inspection caveats remain visible.
+
 A short PowerShell function can point to your Twiglet checkout:
 
 ```powershell
