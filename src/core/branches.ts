@@ -9,6 +9,22 @@ import type { BranchDetails, BranchList, Head, LocalBranch, Tracking } from './t
 
 const message = (error: unknown) => error instanceof Error ? error.message : String(error);
 
+/** Resolve an exact local name without accepting revision expressions or options. */
+export async function resolveLocalBranch(cwd: string, name: string, signal?: AbortSignal, run: GitRunner = runGit): Promise<{ name: string; ref: string; oid: string | null }> {
+  const ref = `refs/heads/${name}`;
+  const valid = await run(cwd, ['check-ref-format', ref], signal);
+  if (valid.code !== 0) throw new RepositoryError(`Local branch not found: ${name}`);
+  const result = await run(cwd, ['rev-parse', '--verify', '--quiet', '--end-of-options', ref], signal);
+  if (result.code === 0) {
+    const oid = result.stdout.toString('ascii').trim();
+    if (!/^[0-9a-f]+$/.test(oid)) throw new RepositoryError('Invalid branch object ID.');
+    return { name, ref, oid };
+  }
+  const head = await readHead(cwd, signal, run);
+  if (result.code === 1 && head.kind === 'unborn' && head.name === name) return { name, ref, oid: null };
+  throw new RepositoryError(`Local branch not found: ${name}`);
+}
+
 async function readList(cwd: string, root: string, signal?: AbortSignal): Promise<BranchList> {
   const head = await readHead(cwd, signal);
   const rows = parseBranches(await git(cwd, ['for-each-ref', `--format=${branchFormat}`, '--', 'refs/heads/'], signal));
@@ -58,6 +74,7 @@ export async function listLocalBranches(directory: string, signal?: AbortSignal)
 
 export async function readBranchDetails(directory: string, name: string, signal?: AbortSignal, run: GitRunner = runGit): Promise<BranchDetails> {
   const { cwd, root, shallow } = await discover(directory, signal);
+  await resolveLocalBranch(cwd, name, signal);
   // Exact lookup in local refs prevents option/revision-expression interpretation.
   const branch = (await readList(cwd, root, signal)).branches.find((entry) => entry.name === name);
   if (!branch) throw new RepositoryError(`Local branch not found: ${name}`);

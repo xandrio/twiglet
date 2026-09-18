@@ -1818,7 +1818,7 @@ async function readUpstream(cwd, head, shallow, signal, run = runGit, verifyHead
     ...target ? { target } : {},
     ...configured ? { configured } : {}
   });
-  const query = async (args) => {
+  const query2 = async (args) => {
     const result = await run(cwd, args, signal);
     if (result.code !== 0) throw new RepositoryError(result.stderr.trim() || `Git ${args[0]} failed.`);
     return result.stdout;
@@ -1838,17 +1838,17 @@ async function readUpstream(cwd, head, shallow, signal, run = runGit, verifyHead
     if (!configured) return { kind: "none" };
     if (merges.length !== 1) return unavailable("unresolved", "Upstream configuration must identify one merge target.");
     const branchRef = `refs/heads/${head.name}`;
-    const data = await query(["for-each-ref", "--format=%(refname)%00%(upstream)%00%(upstream:remotename)%00", "--", branchRef]);
+    const data = await query2(["for-each-ref", "--format=%(refname)%00%(upstream)%00%(upstream:remotename)%00", "--", branchRef]);
     const row = data.toString("utf8").split("\n").map((line) => line.split("\0")).find((fields2) => fields2[0] === branchRef);
     if (!row?.[1]) return unavailable("unresolved", "Configured upstream cannot be mapped to a local reference.");
     target = { ref: row[1], source: row[2] === "." ? "local-branch" : "remote-tracking" };
     const exists = await run(cwd, ["show-ref", "--verify", "--quiet", target.ref], signal);
     if (exists.code === 1) return unavailable("missing-ref", target.source === "local-branch" ? "Configured upstream branch is unavailable locally." : "Configured upstream reference is unavailable locally; its remote existence is unknown.");
     if (exists.code !== 0) throw new RepositoryError(exists.stderr.trim() || "Cannot read upstream reference.");
-    const upstreamOid = (await query(["rev-parse", "--verify", "--end-of-options", `${target.ref}^{commit}`])).toString("ascii").trim();
+    const upstreamOid = (await query2(["rev-parse", "--verify", "--end-of-options", `${target.ref}^{commit}`])).toString("ascii").trim();
     if (!/^[0-9a-f]+$/.test(upstreamOid)) throw new RepositoryError("Git returned an invalid upstream object ID.");
     if (shallow) return unavailable("shallow", "Divergence unavailable: shallow history is incomplete.");
-    const counts = parseDivergence(await query(["rev-list", "--left-right", "--count", `${head.oid}...${upstreamOid}`, "--"]));
+    const counts = parseDivergence(await query2(["rev-list", "--left-right", "--count", `${head.oid}...${upstreamOid}`, "--"]));
     return { kind: "compared", target, headOid: head.oid, upstreamOid, ...counts };
   };
   try {
@@ -1955,6 +1955,20 @@ function parseBranches(data) {
 
 // src/core/branches.ts
 var message = (error) => error instanceof Error ? error.message : String(error);
+async function resolveLocalBranch(cwd, name, signal, run = runGit) {
+  const ref = `refs/heads/${name}`;
+  const valid = await run(cwd, ["check-ref-format", ref], signal);
+  if (valid.code !== 0) throw new RepositoryError(`Local branch not found: ${name}`);
+  const result = await run(cwd, ["rev-parse", "--verify", "--quiet", "--end-of-options", ref], signal);
+  if (result.code === 0) {
+    const oid = result.stdout.toString("ascii").trim();
+    if (!/^[0-9a-f]+$/.test(oid)) throw new RepositoryError("Invalid branch object ID.");
+    return { name, ref, oid };
+  }
+  const head = await readHead(cwd, signal, run);
+  if (result.code === 1 && head.kind === "unborn" && head.name === name) return { name, ref, oid: null };
+  throw new RepositoryError(`Local branch not found: ${name}`);
+}
 async function readList(cwd, root, signal) {
   const head = await readHead(cwd, signal);
   const rows = parseBranches(await git(cwd, ["for-each-ref", `--format=${branchFormat}`, "--", "refs/heads/"], signal));
@@ -2002,6 +2016,7 @@ async function listLocalBranches(directory, signal) {
 }
 async function readBranchDetails(directory, name, signal, run = runGit) {
   const { cwd, root, shallow } = await discover(directory, signal);
+  await resolveLocalBranch(cwd, name, signal);
   const branch = (await readList(cwd, root, signal)).branches.find((entry) => entry.name === name);
   if (!branch) throw new RepositoryError(`Local branch not found: ${name}`);
   const head = branch.tip ? { kind: "branch", name, oid: branch.tip.oid } : { kind: "unborn", name };
@@ -3510,6 +3525,122 @@ function createTerminal(signal) {
   };
 }
 
+// src/terminal/comparison.ts
+function endpoints(comparison, style) {
+  return [
+    `A (reference): ${style.ref(safeText(comparison.a.ref))} ${style.hash(comparison.a.oid)}`,
+    `B (inspected): ${style.ref(safeText(comparison.b.ref))} ${style.hash(comparison.b.oid)}`
+  ];
+}
+function renderComparison(comparison, style = plain) {
+  const lines = [style.heading("Branch comparison"), `Location: ${safeText(comparison.root)}`, ...endpoints(comparison, style)];
+  if (comparison.counts.kind === "available") lines.push(`Only in A: ${comparison.counts.value.a} commits`, `Only in B: ${comparison.counts.value.b} commits`);
+  else lines.push(style.warning(comparison.counts.message));
+  if (comparison.bases.kind === "unavailable") lines.push(style.warning(comparison.bases.message));
+  else if (!comparison.bases.value.length) lines.push("Merge base: none (unrelated histories).");
+  else if (comparison.bases.value.length === 1) lines.push(`Merge base: ${style.hash(comparison.bases.value[0])}`);
+  else lines.push("Multiple merge bases; no single base selected:", ...comparison.bases.value.map((id) => `  ${style.hash(id)}`));
+  lines.push(
+    style.muted("Unique commits describe reachability, not patch equivalence. File views compare committed snapshots."),
+    style.muted("No checkout, working-tree comparison, fetch, or prediction of a merge result.")
+  );
+  return lines.join("\n") + "\n";
+}
+function renderComparisonDetail(comparison, detail, style = plain) {
+  const title = detail.kind === "commits" ? `Commits only in ${detail.side.toUpperCase()}` : detail.view === "tips" ? "Files: A tip → B tip" : "Files: merge base → B tip";
+  const lines = [style.heading(title), ...endpoints(comparison, style)];
+  if (detail.kind === "commits") {
+    lines.push("Reachable only from this side, including merges; patch-equivalent commits are not excluded.", `Total: ${detail.total} commits`, "");
+    for (const commit of detail.commits) lines.push(...renderCommit(commit, style));
+    if (!detail.total) lines.push("No unique commits on this side.");
+    if (detail.total > detail.commits.length) lines.push(`Showing ${detail.commits.length} of ${detail.total} commits.`);
+  } else {
+    lines.push(
+      `Before: ${style.hash(detail.before)}`,
+      `After: ${style.hash(detail.after)}`,
+      detail.view === "tips" ? "Changes to transform the A snapshot into the B snapshot." : "Net changes from the common ancestor snapshot to B; not a predicted merge result.",
+      `Changed paths: ${detail.total}`,
+      ""
+    );
+    for (const file of detail.files) {
+      const from = file.originalPath ? `${displayPath(file.originalPath)} -> ` : "";
+      lines.push(`${style.heading(file.status)} ${from}${displayPath(file.path)}${file.similarity !== void 0 ? ` (${file.similarity}% similarity)` : ""}${file.submodule ? " [submodule pointer]" : ""}`);
+    }
+    if (!detail.total) lines.push("No committed file differences between these endpoints.");
+    if (detail.total > detail.files.length) lines.push(`Showing ${detail.files.length} of ${detail.total} changed paths.`);
+    lines.push(style.muted("A added · M modified · D deleted · R renamed · T type changed. Renames: Git similarity ≥50%, exhaustive search limited to 1000 candidates."));
+  }
+  return lines.join("\n") + "\n";
+}
+async function comparisonSession(terminal, operations, inspected, signal) {
+  const style = terminal.style ?? plain;
+  try {
+    const list = await operations.branches();
+    const candidates = list.branches.filter((branch) => branch.name !== inspected);
+    if (!candidates.length) {
+      terminal.write("No other local branch is available for comparison.\n");
+      return;
+    }
+    const choice = await terminal.choose("Reference branch A", [{ name: "Back", value: "back" }, ...candidates.map((branch) => ({ name: branchChoice(branch), short: safeText(branch.name), value: branch.ref }))], candidates.find((branch) => branch.current)?.ref ?? "back");
+    if (choice === "back") return;
+    let a = candidates.find((branch) => branch.ref === choice).name;
+    let b = inspected;
+    let comparison;
+    let reload = true;
+    while (!signal?.aborted) {
+      if (reload) {
+        comparison = void 0;
+        try {
+          comparison = await operations.compare(a, b);
+          terminal.write("\n" + renderComparison(comparison, style));
+        } catch (error) {
+          if (signal?.aborted) return;
+          terminal.write(style.error(safeText(error instanceof Error ? error.message : String(error))) + "\n");
+        }
+        reload = false;
+      }
+      const action = await terminal.choose("Comparison", [
+        ...comparison ? [
+          { name: "Commits only in A", value: "commits-a" },
+          { name: "Commits only in B", value: "commits-b" },
+          { name: "Files: A tip → B tip", value: "tips" },
+          { name: "Files: merge base → B tip", value: "since-base" },
+          { name: "Swap A and B", value: "swap" }
+        ] : [],
+        { name: "Refresh", value: "refresh" },
+        { name: "Back", value: "back" }
+      ]);
+      if (action === "back") return;
+      if (action === "swap" && comparison) {
+        [a, b] = [b, a];
+        comparison = {
+          ...comparison,
+          a: comparison.b,
+          b: comparison.a,
+          counts: comparison.counts.kind === "available" ? { kind: "available", value: { a: comparison.counts.value.b, b: comparison.counts.value.a } } : comparison.counts
+        };
+        terminal.write("\n" + renderComparison(comparison, style));
+        continue;
+      }
+      if (action === "refresh") {
+        reload = true;
+        continue;
+      }
+      try {
+        terminal.write("\n" + renderComparisonDetail(comparison, await operations.comparisonDetail(comparison, action), style));
+      } catch (error) {
+        if (signal?.aborted) return;
+        terminal.write(style.warning(safeText(error instanceof Error ? error.message : String(error))) + "\n");
+      }
+      const next = await terminal.choose("Navigation", [{ name: "Back to comparison", value: "back" }, { name: "Refresh comparison", value: "refresh" }]);
+      reload = next === "refresh";
+    }
+  } catch (error) {
+    if (signal?.aborted) return;
+    throw error;
+  }
+}
+
 // src/terminal/session.ts
 function isCancellation(error) {
   return error instanceof Error && ["ExitPromptError", "AbortPromptError", "CancelPromptError"].includes(error.name);
@@ -3528,7 +3659,7 @@ async function branchSession(terminal, operations, signal) {
       if (await terminal.choose("Navigation", [{ name: "Back", value: "back" }, { name: "Refresh", value: "refresh" }]) === "back") return;
       continue;
     }
-    const choices = [{ name: "Back", value: "back" }, { name: "Refresh", value: "refresh" }, ...list.branches.map((branch2) => ({ name: branchChoice(branch2), value: branch2.ref }))];
+    const choices = [{ name: "Back", value: "back" }, { name: "Refresh", value: "refresh" }, ...list.branches.map((branch2) => ({ name: branchChoice(branch2), short: safeText(branch2.name), value: branch2.ref }))];
     if (!list.branches.length) terminal.write("No local branches.\n");
     const choice = await terminal.choose("Local branches", choices, list.branches.some((b) => b.ref === selected) ? selected : list.branches[0]?.ref ?? "back");
     if (choice === "back") return;
@@ -3545,7 +3676,17 @@ async function branchSession(terminal, operations, signal) {
         terminal.write(style.error(`Unable to inspect branch: ${safeText(error instanceof Error ? error.message : String(error))}`) + "\n");
       }
       if (signal?.aborted) return;
-      action = await terminal.choose("Navigation", [{ name: "Back", value: "back" }, { name: "Refresh", value: "refresh" }]);
+      action = await terminal.choose("Navigation", [{ name: "Back", value: "back" }, { name: "Refresh", value: "refresh" }, { name: "Compare with another branch…", value: "compare" }]);
+      if (action === "compare") {
+        try {
+          await comparisonSession(terminal, operations, branch.name, signal);
+        } catch (error) {
+          if (isCancellation(error)) throw error;
+          if (signal?.aborted) return;
+          terminal.write(style.error(safeText(error instanceof Error ? error.message : String(error))) + "\n");
+        }
+        action = "refresh";
+      }
     }
   }
 }
@@ -3580,13 +3721,111 @@ async function interactiveSession(terminal, operations, signal) {
   }
 }
 
+// src/git/diff.ts
+function parseDiff(data) {
+  const fields2 = [];
+  let start = 0;
+  for (let i = 0; i < data.length; i++) if (data[i] === 0) {
+    fields2.push(data.subarray(start, i));
+    start = i + 1;
+  }
+  if (start !== data.length) throw new RepositoryError("Malformed Git file comparison.");
+  const result = [];
+  for (let i = 0; i < fields2.length; ) {
+    const match = /^:(\d{6}) (\d{6}) [0-9a-f]+ [0-9a-f]+ ([AMDRT])(\d*)$/.exec(fields2[i++].toString("ascii"));
+    const path = fields2[i++];
+    if (!match || !path?.length) throw new RepositoryError("Malformed Git file comparison.");
+    const status = match[3];
+    const entry = { status, path, submodule: match[1] === "160000" || match[2] === "160000" };
+    if (status === "R") {
+      const destination = fields2[i++];
+      const similarity = Number(match[4]);
+      if (!destination?.length || !match[4] || similarity > 100) throw new RepositoryError("Malformed Git rename.");
+      entry.originalPath = path;
+      entry.path = destination;
+      entry.similarity = similarity;
+    }
+    result.push(entry);
+  }
+  return result;
+}
+
+// src/core/comparison.ts
+async function query(cwd, args, signal, run) {
+  const result = await run(cwd, args, signal);
+  if (result.code !== 0) throw new RepositoryError(result.stderr.trim() || `Git ${args[0]} failed.`);
+  return result.stdout;
+}
+async function optional(operation, signal) {
+  try {
+    return { kind: "available", value: await operation() };
+  } catch (error) {
+    if (signal?.aborted) throw error;
+    return { kind: "unavailable", message: error instanceof Error ? error.message : String(error) };
+  }
+}
+async function verify(cwd, comparison, signal, run) {
+  for (const endpoint of [comparison.a, comparison.b]) {
+    const result = await run(cwd, ["rev-parse", "--verify", "--quiet", "--end-of-options", endpoint.ref], signal);
+    if (result.code !== 0 || result.stdout.toString("ascii").trim() !== endpoint.oid) {
+      throw new RepositoryError("A comparison branch moved or disappeared. Refresh to capture both tips again.");
+    }
+  }
+}
+async function readComparison(directory, a, b, signal, run = runGit) {
+  const { cwd, root, shallow } = await discover(directory, signal);
+  const left = await resolveLocalBranch(cwd, a, signal, run);
+  const right = await resolveLocalBranch(cwd, b, signal, run);
+  if (!left.oid || !right.oid) throw new RepositoryError("Comparison requires two committed branch tips; an unborn branch has no snapshot.");
+  const counts = shallow ? { kind: "unavailable", message: "Shallow history: unique commit counts are unavailable." } : await optional(async () => {
+    const result = parseDivergence(await query(cwd, ["rev-list", "--left-right", "--count", `${left.oid}...${right.oid}`, "--"], signal, run));
+    return { a: result.ahead, b: result.behind };
+  }, signal);
+  const bases = shallow ? { kind: "unavailable", message: "Shallow history: merge-base conclusions are unavailable." } : await optional(async () => {
+    const result = await run(cwd, ["merge-base", "--all", left.oid, right.oid], signal);
+    if (result.code === 1 && !result.stdout.length) return [];
+    if (result.code !== 0) throw new RepositoryError(result.stderr.trim() || "Cannot determine merge bases.");
+    const ids = result.stdout.toString("ascii").trim().split(/\s+/);
+    if (!ids.every((id) => /^[0-9a-f]+$/.test(id))) throw new RepositoryError("Invalid merge-base output.");
+    return ids;
+  }, signal);
+  const comparison = { root, a: { ...left, oid: left.oid }, b: { ...right, oid: right.oid }, shallow, counts, bases };
+  await verify(cwd, comparison, signal, run);
+  return comparison;
+}
+async function readComparisonDetail(comparison, view, signal, run = runGit) {
+  const { cwd, shallow } = await discover(comparison.root, signal);
+  if (shallow !== comparison.shallow) throw new RepositoryError("History completeness changed. Refresh the comparison.");
+  await verify(cwd, comparison, signal, run);
+  let detail;
+  if (view === "commits-a" || view === "commits-b") {
+    if (comparison.counts.kind === "unavailable") throw new RepositoryError(comparison.counts.message);
+    const side = view === "commits-a" ? "a" : "b";
+    const other = side === "a" ? "b" : "a";
+    const commits = parseHistory(await query(cwd, ["log", "-z", "--date-order", "--max-count=20", "--no-patch", "--no-decorate", "--no-notes", "--no-show-signature", "--no-use-mailmap", "--encoding=UTF-8", "--format=%H%x00%P%x00%an%x00%cI%x00%s", comparison[side].oid, `^${comparison[other].oid}`, "--"], signal, run));
+    detail = { kind: "commits", side, commits, total: comparison.counts.value[side] };
+  } else {
+    let before = comparison.a.oid;
+    if (view === "since-base") {
+      if (comparison.bases.kind === "unavailable") throw new RepositoryError(comparison.bases.message);
+      if (comparison.bases.value.length !== 1) throw new RepositoryError(comparison.bases.value.length ? "Multiple merge bases; no single base was selected." : "No common ancestor; merge-base comparison is unavailable.");
+      before = comparison.bases.value[0];
+    }
+    const files = parseDiff(await query(cwd, ["diff", "--raw", "-z", "--no-abbrev", "--no-ext-diff", "--no-textconv", "--no-relative", "--ignore-submodules=none", "--submodule=short", "--no-renames", "--find-renames=50%", "-l1000", before, comparison.b.oid, "--"], signal, run));
+    detail = { kind: "files", view, before, after: comparison.b.oid, files: files.slice(0, 50), total: files.length };
+  }
+  await verify(cwd, comparison, signal, run);
+  return detail;
+}
+
 // src/cli.ts
-var help = `Twiglet 0.3.0 - a small Git repository companion
+var help = `Twiglet 0.4.0 - a small Git repository companion
 
 Usage: tl [--repo <directory>] [status]
        tl [--repo <directory>] log [--limit N]
        tl [--repo <directory>] branches
        tl [--repo <directory>] branch <name>
+       tl [--repo <directory>] compare <A> <B> [--view commits-a|commits-b|tips|since-base]
        tl --help
        tl --version
 
@@ -3595,6 +3834,8 @@ Without an interactive terminal, print the overview and exit.
 status always prints the overview. --repo defaults to the current directory.
 log prints history reachable from HEAD, including merges (default 20, limit 1-100).
 branches lists local branches. branch inspects one exact local name without checkout.
+compare prints a summary. A is the reference, B the inspected local branch.
+tips compares A tip to B tip; since-base compares their single merge base to B.
 Unavailable upstream comparison does not fail an otherwise useful overview.
 Requires Node 22+ and installed Git. No fetch or repository changes.
 `;
@@ -3602,6 +3843,8 @@ async function main() {
   const args = process.argv.slice(2);
   let directory = process.cwd();
   let command;
+  let comparisonNames;
+  let view;
   let branchName;
   let limit;
   let information;
@@ -3612,12 +3855,22 @@ async function main() {
       if (!args[i + 1] || args[i + 1].startsWith("--")) throw new Error("--repo requires a directory.");
       directory = args[++i];
       repoSet = true;
-    } else if ((arg === "status" || arg === "log" || arg === "branches" || arg === "branch") && !command) {
+    } else if ((arg === "status" || arg === "log" || arg === "branches" || arg === "branch" || arg === "compare") && !command) {
       command = arg;
       if (arg === "branch") {
         branchName = args[++i];
         if (!branchName) throw new Error("branch requires a local branch name.");
       }
+      if (arg === "compare") {
+        const a = args[++i];
+        const b = args[++i];
+        if (!a || !b) throw new Error("compare requires two local branch names: A B.");
+        comparisonNames = [a, b];
+      }
+    } else if (arg === "--view" && view === void 0) {
+      const value = args[++i];
+      if (!value || !["commits-a", "commits-b", "tips", "since-base"].includes(value)) throw new Error("--view requires commits-a, commits-b, tips, or since-base.");
+      view = value;
     } else if (arg === "--limit" && limit === void 0) {
       const value = args[++i];
       if (!value || !/^\d+$/.test(value) || Number(value) < 1 || Number(value) > 100) throw new Error("--limit requires an integer from 1 to 100.");
@@ -3627,10 +3880,11 @@ async function main() {
     else throw new Error(`Unknown argument: ${arg}. Use --help for usage.`);
   }
   if (information) {
-    process.stdout.write(information === "help" ? help : "0.3.0\n");
+    process.stdout.write(information === "help" ? help : "0.4.0\n");
     return;
   }
   if (limit !== void 0 && command !== "log") throw new Error("--limit is only supported with log.");
+  if (view !== void 0 && command !== "compare") throw new Error("--view is only supported with compare.");
   const abort = new AbortController();
   const interrupt = () => abort.abort();
   process.on("SIGINT", interrupt);
@@ -3642,9 +3896,14 @@ async function main() {
       overview: () => readOverview(directory, abort.signal),
       history: () => readRecentCommits(directory, limit ?? 20, abort.signal),
       branches: () => listLocalBranches(directory, abort.signal),
-      branch: (name) => readBranchDetails(directory, name, abort.signal)
+      branch: (name) => readBranchDetails(directory, name, abort.signal),
+      compare: (a, b) => readComparison(directory, a, b, abort.signal),
+      comparisonDetail: (comparison, view2) => readComparisonDetail(comparison, view2, abort.signal)
     };
-    if (command === "branches") {
+    if (command === "compare") {
+      const comparison = await operations.compare(...comparisonNames);
+      process.stdout.write(view ? renderComparisonDetail(comparison, await operations.comparisonDetail(comparison, view), style) : renderComparison(comparison, style));
+    } else if (command === "branches") {
       process.stdout.write(renderBranches(await operations.branches(), style));
     } else if (command === "branch") {
       process.stdout.write(renderBranchDetails(await operations.branch(branchName), style));

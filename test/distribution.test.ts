@@ -51,7 +51,7 @@ test('candidate checkout can be cloned and run without install, build, or node_m
   assert.equal(explicit.status, 0, explicit.stderr);
   await assertLocation(explicit.stdout, other);
   assert.match(invoke(entry, directory, ['--help']).stdout, /Usage: tl/);
-  assert.equal(invoke(entry, directory, ['--version']).stdout.trim(), '0.3.0');
+  assert.equal(invoke(entry, directory, ['--version']).stdout.trim(), '0.4.0');
   const history = invoke(entry, directory, ['--repo', nested, 'log', '--limit', '1']);
   assert.equal(history.status, 0, history.stderr);
   assert.match(history.stdout, /Initial/);
@@ -62,6 +62,27 @@ test('candidate checkout can be cloned and run without install, build, or node_m
   assert.equal(branch.status, 0, branch.stderr);
   assert.match(branch.stdout, /Branch: topic/);
   assert.match(branch.stdout, /Initial/);
+  fixtureGit(other, 'branch', 'reference');
+  fixtureGit(other, 'commit', '--allow-empty', '-m', 'Unique B commit');
+  const summary = invoke(entry, nested, ['compare', 'reference', 'topic']);
+  assert.equal(summary.status, 0, summary.stderr);
+  assert.match(summary.stdout, /Only in B: 1 commits/);
+  for (const view of ['commits-a', 'commits-b', 'tips', 'since-base']) {
+    const result = invoke(entry, directory, ['--repo', nested, 'compare', 'reference', 'topic', '--view', view]);
+    assert.equal(result.status, 0, result.stderr);
+    assert(!result.stdout.includes('\x1b'));
+    assert.match(result.stdout, /refs\/heads\/reference/);
+  }
+  const unrelated = fixtureGit(other, 'commit-tree', 'HEAD^{tree}', '-m', 'Orphan');
+  fixtureGit(other, 'branch', 'unrelated', unrelated);
+  assert.equal(invoke(entry, nested, ['compare', 'topic', 'unrelated']).status, 0);
+  assert.equal(invoke(entry, nested, ['compare', 'topic', 'unrelated', '--view', 'tips']).status, 0);
+  const unavailable = invoke(entry, nested, ['compare', 'topic', 'unrelated', '--view', 'since-base']);
+  assert.equal(unavailable.status, 1);
+  assert.match(unavailable.stderr, /No common ancestor/);
+  for (const args of [['compare'], ['compare', 'topic'], ['compare', 'topic~1', 'topic'], ['compare', 'topic', 'topic', '--view', 'diff'], ['status', '--view', 'tips']]) {
+    assert.equal(invoke(entry, nested, args).status, 1);
+  }
   for (const args of [['branch'], ['branch', 'HEAD~1'], ['branch', 'missing'], ['branches', '--limit', '2']]) {
     assert.equal(invoke(entry, nested, args).status, 1);
   }
@@ -169,6 +190,45 @@ process.on('exit', () => {
     assert.equal(/\x1b\[\d+(?:;\d+)*m/.test(result.stdout), Boolean(color));
     if (!cancel) { assert.match(result.stdout, /Location:/); assert.match(result.stdout, /Initial/); assert.match(result.stdout, /Branch details/); }
   }
+});
+
+test('bundled comparison workflow selects branches, opens file views and exits without installation', async (t) => {
+  const directory = await temp(t);
+  const entry = path.join(directory, 'twiglet.cjs');
+  await cp(path.join(project, 'dist', 'twiglet.cjs'), entry);
+  const repo = await repository(t);
+  fixtureGit(repo, 'branch', 'reference');
+  const preload = path.join(directory, 'terminal.cjs');
+  await writeFile(preload, String.raw`
+const { PassThrough } = require('node:stream');
+const input = new PassThrough(); input.isTTY = true; input.isRaw = false;
+input.setRawMode = raw => { input.isRaw = raw; return input; };
+Object.defineProperty(process, 'stdin', { value: input });
+Object.defineProperty(process.stdout, 'isTTY', { value: true }); process.stdout.columns = 120;
+const down = n => '\x1b[B'.repeat(n) + '\r';
+const steps = [
+  ['? Twiglet', down(2)], ['? Local branches', '\r'], ['? Navigation', down(2)],
+  ['? Reference branch A', down(1)], ['? Comparison\n> Commits only in A', down(2)], ['? Navigation', '\r'],
+  ['? Comparison\n> Commits only in A', down(3)], ['? Navigation', '\r'], ['? Comparison\n> Commits only in A', down(4)],
+  ['? Comparison\n> Commits only in A', down(5)], ['? Comparison\n> Commits only in A', down(6)], ['? Navigation', '\r'],
+  ['? Local branches', '\x1b[A\x1b[A\r'], ['? Twiglet', down(1)],
+];
+let phase = 0;
+const original = process.stdout.write.bind(process.stdout);
+process.stdout.write = function(chunk, ...args) {
+  const text = String(chunk).replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, '');
+  if (steps[phase] && text.includes(steps[phase][0])) {
+    const key = steps[phase++][1]; setTimeout(() => input.write(key), 30);
+  }
+  return original(chunk, ...args);
+};
+process.on('exit', () => { if (input.isRaw || phase !== steps.length) process.exitCode = 9; });
+`);
+  const result = spawnSync(process.execPath, ['--require', preload, entry], { cwd: repo, encoding: 'utf8', timeout: 30_000, windowsHide: true, env: { ...process.env, TERM: 'xterm', NO_COLOR: '1', FORCE_COLOR: '0' } });
+  assert.equal(result.status, 0, result.stderr + result.stdout);
+  assert.match(result.stdout, /Files: A tip → B tip/);
+  assert.match(result.stdout, /Files: merge base → B tip/);
+  assert.match(result.stdout, /No committed file differences/);
 });
 
 test('distribution includes notices and no absolute development paths', async () => {

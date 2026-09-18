@@ -6,13 +6,17 @@ import { createTerminal } from './terminal/prompt.js';
 import { interactiveSession, isCancellation } from './terminal/session.js';
 import { renderHistory, renderOverview, safeText } from './terminal/render.js';
 import { outputStyle } from './terminal/style.js';
+import { readComparison, readComparisonDetail } from './core/comparison.js';
+import type { Comparison, ComparisonView } from './core/comparison.js';
+import { renderComparison, renderComparisonDetail } from './terminal/comparison.js';
 
-const help = `Twiglet 0.3.0 - a small Git repository companion
+const help = `Twiglet 0.4.0 - a small Git repository companion
 
 Usage: tl [--repo <directory>] [status]
        tl [--repo <directory>] log [--limit N]
        tl [--repo <directory>] branches
        tl [--repo <directory>] branch <name>
+       tl [--repo <directory>] compare <A> <B> [--view commits-a|commits-b|tips|since-base]
        tl --help
        tl --version
 
@@ -21,6 +25,8 @@ Without an interactive terminal, print the overview and exit.
 status always prints the overview. --repo defaults to the current directory.
 log prints history reachable from HEAD, including merges (default 20, limit 1-100).
 branches lists local branches. branch inspects one exact local name without checkout.
+compare prints a summary. A is the reference, B the inspected local branch.
+tips compares A tip to B tip; since-base compares their single merge base to B.
 Unavailable upstream comparison does not fail an otherwise useful overview.
 Requires Node 22+ and installed Git. No fetch or repository changes.
 `;
@@ -28,7 +34,9 @@ Requires Node 22+ and installed Git. No fetch or repository changes.
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
   let directory = process.cwd();
-  let command: 'status' | 'log' | 'branches' | 'branch' | undefined;
+  let command: 'status' | 'log' | 'branches' | 'branch' | 'compare' | undefined;
+  let comparisonNames: [string, string] | undefined;
+  let view: ComparisonView | undefined;
   let branchName: string | undefined;
   let limit: number | undefined;
   let information: 'help' | 'version' | undefined;
@@ -39,12 +47,23 @@ async function main(): Promise<void> {
       if (!args[i + 1] || args[i + 1]!.startsWith('--')) throw new Error('--repo requires a directory.');
       directory = args[++i]!;
       repoSet = true;
-    } else if ((arg === 'status' || arg === 'log' || arg === 'branches' || arg === 'branch') && !command) {
+    } else if ((arg === 'status' || arg === 'log' || arg === 'branches' || arg === 'branch' || arg === 'compare') && !command) {
       command = arg;
       if (arg === 'branch') {
         branchName = args[++i];
         if (!branchName) throw new Error('branch requires a local branch name.');
       }
+      if (arg === 'compare') {
+        const a = args[++i];
+        const b = args[++i];
+        if (!a || !b) throw new Error('compare requires two local branch names: A B.');
+        comparisonNames = [a, b];
+      }
+    }
+    else if (arg === '--view' && view === undefined) {
+      const value = args[++i];
+      if (!value || !['commits-a', 'commits-b', 'tips', 'since-base'].includes(value)) throw new Error('--view requires commits-a, commits-b, tips, or since-base.');
+      view = value as ComparisonView;
     }
     else if (arg === '--limit' && limit === undefined) {
       const value = args[++i];
@@ -55,8 +74,9 @@ async function main(): Promise<void> {
     else if (arg === '--version') information = 'version';
     else throw new Error(`Unknown argument: ${arg}. Use --help for usage.`);
   }
-  if (information) { process.stdout.write(information === 'help' ? help : '0.3.0\n'); return; }
+  if (information) { process.stdout.write(information === 'help' ? help : '0.4.0\n'); return; }
   if (limit !== undefined && command !== 'log') throw new Error('--limit is only supported with log.');
+  if (view !== undefined && command !== 'compare') throw new Error('--view is only supported with compare.');
   const abort = new AbortController();
   const interrupt = () => abort.abort();
   process.on('SIGINT', interrupt);
@@ -69,8 +89,13 @@ async function main(): Promise<void> {
       history: () => readRecentCommits(directory, limit ?? 20, abort.signal),
       branches: () => listLocalBranches(directory, abort.signal),
       branch: (name: string) => readBranchDetails(directory, name, abort.signal),
+      compare: (a: string, b: string) => readComparison(directory, a, b, abort.signal),
+      comparisonDetail: (comparison: Comparison, view: ComparisonView) => readComparisonDetail(comparison, view, abort.signal),
     };
-    if (command === 'branches') {
+    if (command === 'compare') {
+      const comparison = await operations.compare(...comparisonNames!);
+      process.stdout.write(view ? renderComparisonDetail(comparison, await operations.comparisonDetail(comparison, view), style) : renderComparison(comparison, style));
+    } else if (command === 'branches') {
       process.stdout.write(renderBranches(await operations.branches(), style));
     } else if (command === 'branch') {
       process.stdout.write(renderBranchDetails(await operations.branch(branchName!), style));

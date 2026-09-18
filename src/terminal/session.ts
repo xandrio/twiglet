@@ -3,8 +3,10 @@ import { branchChoice, renderBranchContext, renderBranchDetails } from './branch
 import { renderHistory, renderOverview, safeText } from './render.js';
 import { plain } from './style.js';
 import type { Style } from './style.js';
+import type { Comparison, ComparisonDetail, ComparisonView } from '../core/comparison.js';
+import { comparisonSession } from './comparison.js';
 
-export interface Choice { name: string; value: string }
+export interface Choice { name: string; value: string; short?: string }
 export interface Terminal {
   style?: Style;
   choose(message: string, choices: Choice[], defaultValue?: string): Promise<string>;
@@ -20,6 +22,8 @@ export interface RepositoryOperations {
   history(): Promise<RecentCommits>;
   branches(): Promise<BranchList>;
   branch(name: string): Promise<BranchDetails>;
+  compare(a: string, b: string): Promise<Comparison>;
+  comparisonDetail(comparison: Comparison, view: ComparisonView): Promise<ComparisonDetail>;
 }
 
 async function branchSession(terminal: Terminal, operations: RepositoryOperations, signal?: AbortSignal): Promise<void> {
@@ -36,7 +40,7 @@ async function branchSession(terminal: Terminal, operations: RepositoryOperation
       if (await terminal.choose('Navigation', [{ name: 'Back', value: 'back' }, { name: 'Refresh', value: 'refresh' }]) === 'back') return;
       continue;
     }
-    const choices = [{ name: 'Back', value: 'back' }, { name: 'Refresh', value: 'refresh' }, ...list.branches.map((branch) => ({ name: branchChoice(branch), value: branch.ref }))];
+    const choices = [{ name: 'Back', value: 'back' }, { name: 'Refresh', value: 'refresh' }, ...list.branches.map((branch) => ({ name: branchChoice(branch), short: safeText(branch.name), value: branch.ref }))];
     if (!list.branches.length) terminal.write('No local branches.\n');
     const choice = await terminal.choose('Local branches', choices, list.branches.some((b) => b.ref === selected) ? selected : list.branches[0]?.ref ?? 'back');
     if (choice === 'back') return;
@@ -52,7 +56,16 @@ async function branchSession(terminal: Terminal, operations: RepositoryOperation
         terminal.write(style.error(`Unable to inspect branch: ${safeText(error instanceof Error ? error.message : String(error))}`) + '\n');
       }
       if (signal?.aborted) return;
-      action = await terminal.choose('Navigation', [{ name: 'Back', value: 'back' }, { name: 'Refresh', value: 'refresh' }]);
+      action = await terminal.choose('Navigation', [{ name: 'Back', value: 'back' }, { name: 'Refresh', value: 'refresh' }, { name: 'Compare with another branch…', value: 'compare' }]);
+      if (action === 'compare') {
+        try { await comparisonSession(terminal, operations, branch.name, signal); }
+        catch (error) {
+          if (isCancellation(error)) throw error;
+          if (signal?.aborted) return;
+          terminal.write(style.error(safeText(error instanceof Error ? error.message : String(error))) + '\n');
+        }
+        action = 'refresh';
+      }
     }
   }
 }

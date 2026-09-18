@@ -6,8 +6,10 @@ import type { Overview, RecentCommits } from '../src/core/types.js';
 import { readRecentCommits } from '../src/core/history.js';
 import { listLocalBranches, readBranchDetails } from '../src/core/branches.js';
 import { fixtureGit, repository } from './helpers.js';
+import { readComparison, readComparisonDetail } from '../src/core/comparison.js';
 
-const unusedBranches = { branches: async () => { throw new Error('Unexpected branch list'); }, branch: async () => { throw new Error('Unexpected branch detail'); } };
+const unusedComparison = { compare: async () => { throw new Error('Unexpected comparison'); }, comparisonDetail: async () => { throw new Error('Unexpected comparison detail'); } };
+const unusedBranches = { ...unusedComparison, branches: async () => { throw new Error('Unexpected branch list'); }, branch: async () => { throw new Error('Unexpected branch detail'); } };
 
 const overview: Overview = { root: '/repo', head: { kind: 'unborn', name: 'topic' }, upstream: { kind: 'none' }, changes: [], shallow: false, filtersDisabled: false };
 const history: RecentCommits = { root: '/repo', head: overview.head, shallow: false, commits: [], limit: 20, hasMore: false };
@@ -103,6 +105,7 @@ test('branch navigation refreshes real tips, retains selection and recovers afte
     },
     write: (text) => { output += text; },
   }, {
+    ...unusedComparison,
     overview: async () => overview, history: async () => history,
     branches: () => listLocalBranches(root),
     branch: (name) => {
@@ -114,4 +117,47 @@ test('branch navigation refreshes real tips, retains selection and recovers afte
   assert.match(output, /Local branch not found/);
   assert.deepEqual(defaults, ['refs/heads/topic', 'refs/heads/selected', 'refs/heads/selected', 'refs/heads/topic']);
   assert.equal(fixtureGit(root, 'symbolic-ref', '--short', 'HEAD'), 'topic');
+});
+
+test('comparison navigation swaps captured tips, refreshes and returns to selection', async (t) => {
+  const root = await repository(t);
+  fixtureGit(root, 'branch', 'selected');
+  const answers = ['branches', 'refs/heads/selected', 'compare', 'refs/heads/topic', 'commits-a', 'back', 'swap', 'tips', 'refresh', 'since-base', 'back', 'back', 'back', 'back', 'exit'];
+  const pairs: string[][] = [];
+  let output = '';
+  await interactiveSession({
+    choose: async (message, choices, defaultValue) => {
+      if (message === 'Reference branch A') assert.equal(defaultValue, 'refs/heads/topic');
+      const answer = answers.shift()!;
+      assert(choices.some((choice) => choice.value === answer), `${message}: ${answer}`);
+      if (answer === 'tips') {
+        const next = fixtureGit(root, 'commit-tree', 'HEAD^{tree}', '-p', 'HEAD', '-m', 'Moved tip');
+        fixtureGit(root, 'update-ref', 'refs/heads/selected', next);
+      }
+      return answer;
+    }, write: (text) => { output += text; },
+  }, {
+    overview: async () => overview, history: async () => history,
+    branches: () => listLocalBranches(root), branch: (name) => readBranchDetails(root, name),
+    compare: (a, b) => { pairs.push([a, b]); return readComparison(root, a, b); },
+    comparisonDetail: (comparison, view) => readComparisonDetail(comparison, view),
+  });
+  assert.deepEqual(pairs, [['topic', 'selected'], ['selected', 'topic']]);
+  assert.match(output, /moved or disappeared/);
+  assert.match(output, /Files: merge base → B tip/);
+  assert.equal(answers.length, 0);
+});
+
+test('cancellation inside comparison selection exits instead of becoming an inspection error', async (t) => {
+  const root = await repository(t); fixtureGit(root, 'branch', 'other');
+  const answers = ['branches', 'refs/heads/topic', 'compare'];
+  await assert.rejects(interactiveSession({
+    choose: async (message) => {
+      if (message === 'Reference branch A') throw Object.assign(new Error('Cancelled'), { name: 'ExitPromptError' });
+      return answers.shift()!;
+    }, write: () => {},
+  }, {
+    ...unusedComparison, overview: async () => overview, history: async () => history,
+    branches: () => listLocalBranches(root), branch: (name) => readBranchDetails(root, name),
+  }), { name: 'ExitPromptError' });
 });

@@ -68,6 +68,23 @@ fatal lookup/ref-change failures exit 1. Current means current in this worktree;
 other worktree usage is not inferred. Remote branches, arbitrary comparisons,
 graphs, branch mutations, and search/filter UI remain outside this milestone.
 
+Milestone 4 adds local branch comparison from branch details and `compare A B`.
+A is the reference branch; B is inspected. Keep three meanings separate: commits
+reachable only from each side (including merges, no patch equivalence), tree
+changes from A tip to B tip, and tree changes from a single merge base to B tip.
+Never describe any of these as a predicted merge result or the branch creation
+point. Retain full refs and captured IDs. Swapping reverses the captured pair;
+only Refresh resolves new tips. Verify both refs before/after detail queries.
+Use exact local branch resolution without loading upstream or worktree state.
+Shallow history withholds reachability/merge-base conclusions but allows tip
+comparison; unrelated or multiple-base history disables only the single-base view.
+Summary sections fail independently. Explicit unavailable views exit 1, usable
+summaries exit 0, and ordinary differences are successful inspection.
+File inspection uses raw NUL-delimited paths, no external diff/textconv, and explicit
+rename detection (50%, exhaustive limit 1000). Show at most 20 commits or 50 changed
+paths with totals. Submodule pointers are compared without visiting worktrees.
+No patch hunks, graph, remote branches, arbitrary revisions, or merge prediction.
+
 ## Collaboration and decisions
 
 - Humans guide goals, scope, priorities, and major architectural decisions.

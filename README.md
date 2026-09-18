@@ -6,7 +6,8 @@ quick to understand.
 
 This is an early-stage personal project intended to be open source. `tl` opens an
 interactive menu for repository overview, recent commits, and local branch
-exploration, with locally known upstream divergence. Views offer Refresh and Back.
+exploration and comparison, with locally known upstream divergence. Views offer
+Refresh and Back.
 
 ## Technical direction
 
@@ -40,6 +41,8 @@ node /path/to/twiglet/dist/twiglet.cjs
 
 Use the arrow keys and Enter to select **Repository overview**, **Recent commits**,
 or **Local branches**. Select a branch to inspect it without checking it out.
+From its navigation menu, choose **Compare with another branch…**. The selected
+branch is B (inspected); choose another local branch as A (reference).
 **Refresh** rereads local information without fetching; **Back** returns to the menu
 with your previous selection retained. **Exit** closes Twiglet. Ctrl-C cancels and
 restores the terminal.
@@ -72,12 +75,16 @@ tl log
 tl log --limit 50
 tl branches
 tl branch feature/example
+tl compare main feature/example
+tl compare main feature/example --view commits-b
+tl compare main feature/example --view tips
+tl compare main feature/example --view since-base
 tl --repo /path/to/another/repository
 tl --help
 tl --version
 ```
 
-`status`, `log`, `branches`, and `branch <name>` print once. `branch` accepts an exact
+`status`, `log`, `branches`, `branch <name>`, and `compare A B` print once. `branch` accepts an exact
 local branch name, not a revision expression or remote-only reference. All commands
 support `--repo`. `log` defaults to 20 commits; `--limit` accepts 1–100
 and is only valid with `log`. Bare `tl` also prints once when input/output is redirected
@@ -88,6 +95,35 @@ prints the useful overview and exits 0, with a visible explanation. Similarly,
 `branch` preserves branch metadata if history or comparison fails, with a diagnostic
 and exit 0. Missing branches and detected ref changes fail with exit 1. Interactive
 inspection errors stay in the session so you can Refresh, go Back, or Exit.
+
+`compare A B` also accepts only exact local names. Its default summary shows both
+full refs, captured tip IDs, unique commit counts, and merge-base information.
+`--view commits-a` and `--view commits-b` show the latest 20 commits reachable only
+from the named side, including merged ancestry. This is commit reachability, not
+patch equivalence: cherry-picked or otherwise equivalent patches can still have
+different commit identities. Distinct histories can produce identical tip trees.
+
+`--view tips` shows committed file changes from A's tip to B's tip. `--view since-base`
+shows net changes from their single merge base to B's tip. These are different
+endpoints; neither predicts what a merge would produce. A merge base is not
+necessarily the historical branch-creation point. File views show statuses, full
+paths, rename source/destination and similarity, and submodule-pointer labels.
+They show up to 50 changed paths with an exact total; no patch hunks or line counts.
+Renames use Git's 50% similarity threshold and an exhaustive-search limit of 1000
+candidates; candidates beyond that limit may remain additions/deletions.
+
+Interactive comparison loads details on demand and offers Swap A and B, Refresh,
+and Back. Swapping keeps the captured tips; Refresh captures both again. Ref movement
+or deletion is reported rather than silently mixing snapshots. No working-tree
+changes, checkout, network activity, external diff helper, or text conversion is
+involved. Dirty or unreadable indexes do not affect committed comparisons.
+
+Unrelated histories retain unique-commit and tip views but have no merge-base view.
+Multiple merge bases are listed without choosing one arbitrarily. Shallow history
+withholds reachability and merge-base conclusions while allowing tip comparison
+when objects exist. Unborn branches require a first commit. A useful partial summary
+exits 0; an explicitly requested view that cannot be produced exits 1 with a reason.
+Ordinary differences exit 0. Independent summary sections remain usable on failure.
 
 ## Current scope and limits
 
@@ -130,7 +166,7 @@ detached HEAD has no current local branch. “Current” refers only to the insp
 worktree. A branch moved or deleted during inspection produces a Refresh diagnostic.
 Listing uses bulk metadata queries; history and divergence are loaded only for the
 selected branch. Remote-branch browsing, filtering, worktree inventory, arbitrary
-comparisons, and branch mutations are not included.
+revision comparisons, and branch mutations are not included.
 
 Inspection disables optional index writes, filesystem-monitor helpers, and external
 clean/process filters without changing configuration. Filtered paths may consequently
@@ -180,6 +216,12 @@ on Windows with Node 22.16.0 and 24.20.0 and Git 2.43.0.windows.1. This includes
 branch navigation and commands from an isolated checkout without installation.
 The existing six-job CI matrix still needs to confirm this milestone after push.
 
+Milestone 4 passed all 62 tests, type checking, and distribution freshness checks
+on Windows with Node 22.16.0 and 24.20.0 and Git 2.43.0.windows.1. Comparison tests
+cover real commit graphs, independent partial failures, ref changes, file statuses,
+and isolated distribution/navigation. The six-job CI matrix still needs to run for
+this milestone after push; local Windows validation does not confirm other OSes.
+
 ## Direction
 
 Initial areas to explore include:
@@ -217,9 +259,9 @@ For substantial changes, propose a plan for review before implementation. Small,
 well-contained changes can usually be made directly and summarized afterward.
 See [AGENTS.md](AGENTS.md) for practical guidance for coding agents.
 
-Milestone 3 adds local branch exploration. Focused branch comparisons are a natural
-next area to discuss after trying the selection workflow in real repositories;
-their exact interaction and scope remain open.
+Milestone 4 adds explicit local-branch comparison views. A focused file-patch viewer
+is a possible next step after trying comparison in real repositories. Graphs,
+patch-equivalence analysis, and merge-conflict prediction remain outside scope.
 
 ## License
 
