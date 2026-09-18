@@ -6,19 +6,19 @@ import type { RepositoryOperations, Terminal } from './session.js';
 import { branchChoice } from './branches.js';
 
 function endpoints(comparison: Comparison, style: Style): string[] {
-  return [`A (reference): ${style.ref(safeText(comparison.a.ref))} ${style.hash(comparison.a.oid)}`,
-    `B (inspected): ${style.ref(safeText(comparison.b.ref))} ${style.hash(comparison.b.oid)}`];
+  return [`${style.heading('A')} (reference): ${style.ref(safeText(comparison.a.ref))} ${style.hash(comparison.a.oid)}`,
+    `${style.heading('B')} (inspected): ${style.ref(safeText(comparison.b.ref))} ${style.hash(comparison.b.oid)}`];
 }
 
 export function renderComparison(comparison: Comparison, style: Style = plain): string {
-  const lines = [style.heading('Branch comparison'), `Location: ${safeText(comparison.root)}`, ...endpoints(comparison, style)];
-  if (comparison.counts.kind === 'available') lines.push(`Only in A: ${comparison.counts.value.a} commits`, `Only in B: ${comparison.counts.value.b} commits`);
+  const lines = [style.heading('Branch comparison'), `Location: ${safeText(comparison.root)}`, ...endpoints(comparison, style), ''];
+  if (comparison.counts.kind === 'available') lines.push(`Only in A: ${style.heading(String(comparison.counts.value.a))} commits`, `Only in B: ${style.heading(String(comparison.counts.value.b))} commits`);
   else lines.push(style.warning(comparison.counts.message));
   if (comparison.bases.kind === 'unavailable') lines.push(style.warning(comparison.bases.message));
   else if (!comparison.bases.value.length) lines.push('Merge base: none (unrelated histories).');
   else if (comparison.bases.value.length === 1) lines.push(`Merge base: ${style.hash(comparison.bases.value[0]!)}`);
   else lines.push('Multiple merge bases; no single base selected:', ...comparison.bases.value.map((id) => `  ${style.hash(id)}`));
-  lines.push(style.muted('Unique commits describe reachability, not patch equivalence. File views compare committed snapshots.'),
+  lines.push('', style.muted('Unique commits describe reachability, not patch equivalence. File views compare committed snapshots.'),
     style.muted('No checkout, working-tree comparison, fetch, or prediction of a merge result.'));
   return lines.join('\n') + '\n';
 }
@@ -27,21 +27,22 @@ export function renderComparisonDetail(comparison: Comparison, detail: Compariso
   const title = detail.kind === 'commits' ? `Commits only in ${detail.side.toUpperCase()}` : detail.view === 'tips' ? 'Files: A tip → B tip' : 'Files: merge base → B tip';
   const lines = [style.heading(title), ...endpoints(comparison, style)];
   if (detail.kind === 'commits') {
-    lines.push('Reachable only from this side, including merges; patch-equivalent commits are not excluded.', `Total: ${detail.total} commits`, '');
+    lines.push(style.muted('Reachable only from this side, including merges; patch-equivalent commits are not excluded.'), '', `Total: ${style.heading(String(detail.total))} commits`, '');
     for (const commit of detail.commits) lines.push(...renderCommit(commit, style));
     if (!detail.total) lines.push('No unique commits on this side.');
-    if (detail.total > detail.commits.length) lines.push(`Showing ${detail.commits.length} of ${detail.total} commits.`);
+    if (detail.total > detail.commits.length) lines.push('', style.muted(`Showing ${detail.commits.length} of ${detail.total} commits.`));
   } else {
     lines.push(`Before: ${style.hash(detail.before)}`, `After: ${style.hash(detail.after)}`,
-      detail.view === 'tips' ? 'Changes to transform the A snapshot into the B snapshot.' : 'Net changes from the common ancestor snapshot to B; not a predicted merge result.',
-      `Changed paths: ${detail.total}`, '');
+      style.muted(detail.view === 'tips' ? 'Changes to transform the A snapshot into the B snapshot.' : 'Net changes from the common ancestor snapshot to B; not a predicted merge result.'),
+      '', `Changed paths: ${style.heading(String(detail.total))}`, '');
     for (const file of detail.files) {
       const from = file.originalPath ? `${displayPath(file.originalPath)} -> ` : '';
-      lines.push(`${style.heading(file.status)} ${from}${displayPath(file.path)}${file.similarity !== undefined ? ` (${file.similarity}% similarity)` : ''}${file.submodule ? ' [submodule pointer]' : ''}`);
+      lines.push(`  ${style.heading(file.status)} ${from}${displayPath(file.path)}${file.similarity !== undefined ? style.muted(` (${file.similarity}% similarity)`) : ''}${file.submodule ? style.muted(' [submodule pointer]') : ''}`);
     }
     if (!detail.total) lines.push('No committed file differences between these endpoints.');
-    if (detail.total > detail.files.length) lines.push(`Showing ${detail.files.length} of ${detail.total} changed paths.`);
-    lines.push(style.muted('A added · M modified · D deleted · R renamed · T type changed. Renames: Git similarity ≥50%, exhaustive search limited to 1000 candidates.'));
+    if (detail.total > detail.files.length) lines.push('', style.muted(`Showing ${detail.files.length} of ${detail.total} changed paths.`));
+    lines.push('', style.muted('A added · M modified · D deleted · R renamed · T type changed.'),
+      style.muted('Renames: Git similarity ≥50%, exhaustive search limited to 1000 candidates.'));
   }
   return lines.join('\n') + '\n';
 }
