@@ -1684,10 +1684,10 @@ async function git(cwd, args, signal) {
 function invalid() {
   throw new RepositoryError("Git returned malformed porcelain-v2 status data.");
 }
-function fields(record, count) {
+function fields(record, count2) {
   let start = 0;
   const meta = [];
-  for (let i = 0; i < count; i++) {
+  for (let i = 0; i < count2; i++) {
     const end = record.indexOf(32, start);
     if (end < 0) invalid();
     meta.push(record.subarray(start, end).toString("ascii"));
@@ -3011,12 +3011,12 @@ var SignalExit = class extends SignalExitBase {
     for (const sig of signals) {
       this.#sigListeners[sig] = () => {
         const listeners = this.#process.listeners(sig);
-        let { count } = this.#emitter;
+        let { count: count2 } = this.#emitter;
         const p = process4;
         if (typeof p.__signal_exit_emitter__ === "object" && typeof p.__signal_exit_emitter__.count === "number") {
-          count += p.__signal_exit_emitter__.count;
+          count2 += p.__signal_exit_emitter__.count;
         }
-        if (listeners.length === count) {
+        if (listeners.length === count2) {
           this.unload();
           const ret = this.#emitter.emit("exit", null, sig);
           const s = sig === "SIGHUP" ? this.#hupSig : sig;
@@ -3528,18 +3528,21 @@ function createTerminal(signal) {
 // src/terminal/comparison.ts
 function endpoints(comparison, style) {
   return [
-    `${style.heading("A")} (reference): ${style.ref(safeText(comparison.a.ref))} ${style.hash(comparison.a.oid)}`,
-    `${style.heading("B")} (inspected): ${style.ref(safeText(comparison.b.ref))} ${style.hash(comparison.b.oid)}`
+    `${style.selection("A")} (reference): ${style.ref(safeText(comparison.a.ref))} ${style.hash(comparison.a.oid)}`,
+    `${style.selection("B")} (inspected): ${style.ref(safeText(comparison.b.ref))} ${style.hash(comparison.b.oid)}`
   ];
+}
+function count(value, style) {
+  return value === 0 ? style.muted(String(value)) : style.selection(String(value));
 }
 function renderComparison(comparison, style = plain) {
   const lines = [style.heading("Branch comparison"), `Location: ${safeText(comparison.root)}`, ...endpoints(comparison, style), ""];
-  if (comparison.counts.kind === "available") lines.push(`Only in A: ${style.heading(String(comparison.counts.value.a))} commits`, `Only in B: ${style.heading(String(comparison.counts.value.b))} commits`);
+  if (comparison.counts.kind === "available") lines.push(`Only in A: ${count(comparison.counts.value.a, style)} commits`, `Only in B: ${count(comparison.counts.value.b, style)} commits`);
   else lines.push(style.warning(comparison.counts.message));
   if (comparison.bases.kind === "unavailable") lines.push(style.warning(comparison.bases.message));
-  else if (!comparison.bases.value.length) lines.push("Merge base: none (unrelated histories).");
+  else if (!comparison.bases.value.length) lines.push(`Merge base: ${style.warning("none (unrelated histories).")}`);
   else if (comparison.bases.value.length === 1) lines.push(`Merge base: ${style.hash(comparison.bases.value[0])}`);
-  else lines.push("Multiple merge bases; no single base selected:", ...comparison.bases.value.map((id) => `  ${style.hash(id)}`));
+  else lines.push(style.warning("Multiple merge bases; no single base selected:"), ...comparison.bases.value.map((id) => `  ${style.hash(id)}`));
   lines.push(
     "",
     style.muted("Unique commits describe reachability, not patch equivalence. File views compare committed snapshots."),
@@ -3551,7 +3554,7 @@ function renderComparisonDetail(comparison, detail, style = plain) {
   const title = detail.kind === "commits" ? `Commits only in ${detail.side.toUpperCase()}` : detail.view === "tips" ? "Files: A tip → B tip" : "Files: merge base → B tip";
   const lines = [style.heading(title), ...endpoints(comparison, style)];
   if (detail.kind === "commits") {
-    lines.push(style.muted("Reachable only from this side, including merges; patch-equivalent commits are not excluded."), "", `Total: ${style.heading(String(detail.total))} commits`, "");
+    lines.push(style.muted("Reachable only from this side, including merges; patch-equivalent commits are not excluded."), "", `Total: ${count(detail.total, style)} commits`, "");
     for (const commit of detail.commits) lines.push(...renderCommit(commit, style));
     if (!detail.total) lines.push("No unique commits on this side.");
     if (detail.total > detail.commits.length) lines.push("", style.muted(`Showing ${detail.commits.length} of ${detail.total} commits.`));
@@ -3561,12 +3564,13 @@ function renderComparisonDetail(comparison, detail, style = plain) {
       `After: ${style.hash(detail.after)}`,
       style.muted(detail.view === "tips" ? "Changes to transform the A snapshot into the B snapshot." : "Net changes from the common ancestor snapshot to B; not a predicted merge result."),
       "",
-      `Changed paths: ${style.heading(String(detail.total))}`,
+      `Changed paths: ${count(detail.total, style)}`,
       ""
     );
     for (const file of detail.files) {
       const from = file.originalPath ? `${displayPath(file.originalPath)} -> ` : "";
-      lines.push(`  ${style.heading(file.status)} ${from}${displayPath(file.path)}${file.similarity !== void 0 ? style.muted(` (${file.similarity}% similarity)`) : ""}${file.submodule ? style.muted(" [submodule pointer]") : ""}`);
+      const statusStyle = file.status === "A" ? style.good : file.status === "R" ? style.ref : style.warning;
+      lines.push(`  ${style.heading(statusStyle(file.status))} ${from}${displayPath(file.path)}${file.similarity !== void 0 ? style.muted(` (${file.similarity}% similarity)`) : ""}${file.submodule ? style.muted(" [submodule pointer]") : ""}`);
     }
     if (!detail.total) lines.push("No committed file differences between these endpoints.");
     if (detail.total > detail.files.length) lines.push("", style.muted(`Showing ${detail.files.length} of ${detail.total} changed paths.`));
