@@ -1,5 +1,5 @@
 import { runGit } from '../git/run.js';
-import { parseDiff } from '../git/diff.js';
+import { listSnapshotChanges, readSnapshotPatch } from './changes.js';
 import type { FileChange } from '../git/diff.js';
 import { parseHistory } from '../git/history.js';
 import { discover } from './discovery.js';
@@ -22,7 +22,7 @@ export interface Comparison {
 export type ComparisonView = 'commits-a' | 'commits-b' | 'tips' | 'since-base';
 export type ComparisonDetail =
   | { kind: 'commits'; side: 'a' | 'b'; commits: CommitSummary[]; total: number }
-  | { kind: 'files'; view: 'tips' | 'since-base'; before: string; after: string; files: FileChange[]; total: number };
+  | { kind: 'files'; view: 'tips' | 'since-base'; before: string; after: string; files: FileChange[]; allFiles: FileChange[]; total: number };
 
 async function query(cwd: string, args: string[], signal: AbortSignal | undefined, run: GitRunner): Promise<Buffer> {
   const result = await run(cwd, args, signal);
@@ -88,9 +88,19 @@ export async function readComparisonDetail(comparison: Comparison, view: Compari
       if (comparison.bases.value.length !== 1) throw new RepositoryError(comparison.bases.value.length ? 'Multiple merge bases; no single base was selected.' : 'No common ancestor; merge-base comparison is unavailable.');
       before = comparison.bases.value[0]!;
     }
-    const files = parseDiff(await query(cwd, ['diff', '--raw', '-z', '--no-abbrev', '--no-ext-diff', '--no-textconv', '--no-relative', '--ignore-submodules=none', '--submodule=short', '--no-renames', '--find-renames=50%', '-l1000', before, comparison.b.oid, '--'], signal, run));
-    detail = { kind: 'files', view, before, after: comparison.b.oid, files: files.slice(0, 50), total: files.length };
+    const files = await listSnapshotChanges(cwd, before, comparison.b.oid, signal, run);
+    detail = { kind: 'files', view, before, after: comparison.b.oid, files: files.slice(0, 50), allFiles: files, total: files.length };
   }
   await verify(cwd, comparison, signal, run);
   return detail;
+}
+
+export async function readComparisonPatch(comparison: Comparison, view: 'tips' | 'since-base', path: Buffer, signal?: AbortSignal, run: GitRunner = runGit) {
+  const detail = await readComparisonDetail(comparison, view, signal, run);
+  if (detail.kind !== 'files') throw new RepositoryError('File comparison required.');
+  const file = detail.allFiles.find(file => file.path.equals(path));
+  if (!file) throw new RepositoryError('No changed file with that exact repository-relative path.');
+  const patch = await readSnapshotPatch(comparison.root, detail.before, detail.after, file, signal, run);
+  await verify(comparison.root, comparison, signal, run);
+  return patch;
 }

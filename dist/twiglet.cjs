@@ -1609,6 +1609,146 @@ var require_lib = __commonJS({
   }
 });
 
+// src/terminal/style.ts
+function createStyle(enabled) {
+  const wrap = (open, close) => (text) => enabled && text ? `\x1B[${open}m${text}\x1B[${close}m` : text;
+  const bold = wrap(1, 22);
+  const blue = wrap(34, 39);
+  const green = wrap(32, 39);
+  return {
+    heading: bold,
+    branch: (text) => bold(green(text)),
+    ref: blue,
+    subject: bold,
+    author: green,
+    hash: wrap(2, 22),
+    muted: wrap(2, 22),
+    good: wrap(32, 39),
+    warning: wrap(33, 39),
+    error: wrap(31, 39),
+    selection: (text) => bold(blue(text))
+  };
+}
+var plain = createStyle(false);
+function outputStyle(stream, env = process.env) {
+  return createStyle(Boolean(stream.isTTY) && env.TERM !== "dumb" && !env.NO_COLOR && env.FORCE_COLOR !== "0");
+}
+
+// src/terminal/render.ts
+function safeText(value) {
+  return value.replace(
+    /[\x00-\x1f\x7f-\x9f\u202a-\u202e\u2066-\u2069]/g,
+    (char) => `\\u${char.charCodeAt(0).toString(16).padStart(4, "0")}`
+  );
+}
+function displayPath(path) {
+  const text = path.toString("utf8");
+  if (!Buffer.from(text).equals(path)) return `[path bytes: ${path.toString("hex")}]`;
+  return safeText(text);
+}
+function headLabel(head, style) {
+  return head.kind === "detached" ? `${style.warning("Detached HEAD")} (${style.hash(head.oid.slice(0, 12))})` : head.kind === "unborn" ? `${style.branch(safeText(head.name))} (no commits yet)` : `${style.branch(safeText(head.name))} (${style.hash(head.oid.slice(0, 12))})`;
+}
+function renderUpstream(upstream, style = plain) {
+  if (upstream.kind === "none") return [`Upstream: ${style.muted("not configured")}`];
+  const target = upstream.target;
+  const name = target ? safeText(target.ref) : upstream.kind === "unavailable" && upstream.configured ? safeText(upstream.configured) : "unavailable";
+  const lines = [`Upstream: ${style.ref(name)}${target?.source === "local-branch" ? " (local branch)" : ""}`];
+  if (upstream.kind === "compared") {
+    lines.push(upstream.ahead === 0 && upstream.behind === 0 ? style.good("Matches the local upstream reference.") : `Ahead: ${style.heading(String(upstream.ahead))} commits   Behind: ${style.heading(String(upstream.behind))} commits`);
+  } else lines.push(style.warning(`Comparison unavailable: ${safeText(upstream.message)}`));
+  if (target?.source === "remote-tracking") {
+    lines.push(style.muted("Remote-tracking information is local. Remote freshness unknown; no fetch performed."));
+  }
+  return lines;
+}
+function renderOverview(overview, style = plain) {
+  const { head, changes } = overview;
+  const lines = [
+    style.heading("Repository overview"),
+    `Location: ${safeText(overview.root)}`,
+    `HEAD: ${headLabel(head, style)}`,
+    ...renderUpstream(overview.upstream, style)
+  ];
+  if (overview.shallow) lines.push(style.warning("History: shallow clone; history is incomplete."));
+  if (overview.filtersDisabled) lines.push(style.muted("External clean filters disabled; filtered paths may appear modified."));
+  lines.push("");
+  const groups = [
+    ["Conflicts", changes.filter((c) => c.kind === "conflict")],
+    ["Staged", changes.filter((c) => c.kind !== "conflict" && c.kind !== "untracked" && c.index !== ".")],
+    ["Unstaged", changes.filter((c) => c.kind !== "conflict" && c.kind !== "untracked" && c.worktree !== ".")],
+    ["Untracked", changes.filter((c) => c.kind === "untracked")]
+  ];
+  if (!changes.length) lines.push(`Working tree: ${style.good("clean")} (excluding submodule contents).`);
+  for (const [title, entries] of groups) {
+    if (!entries.length) continue;
+    const emphasize = title === "Conflicts" ? style.error : title === "Staged" ? style.good : style.warning;
+    lines.push(emphasize(`${title}: ${entries.length} ${entries.length === 1 ? "entry" : "entries"}`));
+    for (const entry of entries.slice(0, 30)) {
+      const from = entry.originalPath ? `${displayPath(entry.originalPath)} -> ` : "";
+      lines.push(`  ${emphasize(entry.index + entry.worktree)} ${from}${displayPath(entry.path)}`);
+    }
+    if (entries.length > 30) lines.push(`  ... ${entries.length - 30} more entries`);
+  }
+  lines.push(
+    "",
+    "Untracked directories are grouped. A path can be both staged and unstaged.",
+    "Submodule worktrees are not inspected. No fetch is performed."
+  );
+  return lines.join("\n") + "\n";
+}
+function renderCommit(commit, style = plain) {
+  return [
+    `${style.hash(commit.oid.slice(0, 12))} ${style.subject(safeText(commit.subject) || "(no subject)")}`,
+    `  ${style.author(safeText(commit.author))} | ${style.muted(safeText(commit.committedAt))}${commit.parents.length > 1 ? style.muted(" | merge") : ""}`
+  ];
+}
+function renderHistory(history, style = plain) {
+  const lines = [
+    style.heading("Recent commits"),
+    `Location: ${safeText(history.root)}`,
+    `HEAD: ${headLabel(history.head, style)}`,
+    "History reachable from this HEAD, including merges. Dates are commit dates.",
+    ""
+  ];
+  if (history.head.kind === "unborn") lines.push("No commits yet.");
+  for (const commit of history.commits) {
+    lines.push(...renderCommit(commit, style));
+  }
+  if (history.hasMore) lines.push(`
+Showing ${history.limit} commits; more are available. Use tl log --limit N (up to 100).`);
+  if (history.shallow) lines.push("\n" + style.warning("Shallow repository: only locally available history is shown."));
+  return lines.join("\n") + "\n";
+}
+
+// src/terminal/patch.ts
+function renderPatch(comparison, view, patch, style = plain, page) {
+  const { file } = patch;
+  const lines = [
+    style.heading(view === "tips" ? "File patch: A tip → B tip" : "File patch: merge base → B tip"),
+    `A (reference): ${style.ref(safeText(comparison.a.ref))} ${style.hash(comparison.a.oid)}`,
+    `B (inspected): ${style.ref(safeText(comparison.b.ref))} ${style.hash(comparison.b.oid)}`,
+    `Before: ${style.hash(patch.before)}`,
+    `After: ${style.hash(patch.after)}`,
+    `File: ${file.status} ${file.originalPath ? displayPath(file.originalPath) + " -> " : ""}${displayPath(file.path)}`,
+    `Modes: ${file.beforeMode} → ${file.afterMode}`,
+    `Objects: ${style.hash(file.beforeOid)} → ${style.hash(file.afterOid)}`
+  ];
+  if (file.similarity !== void 0) lines.push(style.muted(`Rename similarity: ${file.similarity}%`));
+  lines.push(style.muted("Committed snapshots only; inspection output, not an apply-ready patch."), "");
+  if (patch.kind === "binary") lines.push("Binary content differs; no binary payload is displayed.");
+  else if (patch.kind === "metadata") lines.push(file.submodule ? "Submodule pointer/type change; submodule contents are not inspected." : "Metadata-only change; no content hunks.");
+  else {
+    const start = page === void 0 ? 0 : page * 80;
+    for (const line of patch.lines.slice(start, page === void 0 ? void 0 : start + 80)) {
+      const text = safeText(line);
+      lines.push(line.startsWith("@@ ") ? style.ref(text) : line.startsWith("+") ? style.good(text) : line.startsWith("-") ? style.warning(text) : text);
+    }
+    if (page !== void 0) lines.push("", style.muted(`Patch lines ${start + 1}–${Math.min(start + 80, patch.lines.length)} of ${patch.lines.length}.`));
+  }
+  return lines.join("\n") + "\n";
+}
+
 // src/git/run.ts
 var import_node_child_process = require("node:child_process");
 
@@ -2035,118 +2175,6 @@ async function readBranchDetails(directory, name, signal, run = runGit) {
   const current = await readHead(cwd, signal);
   branch.current = current.kind !== "detached" && current.name === name;
   return { root, branch, shallow, upstream, history };
-}
-
-// src/terminal/style.ts
-function createStyle(enabled) {
-  const wrap = (open, close) => (text) => enabled && text ? `\x1B[${open}m${text}\x1B[${close}m` : text;
-  const bold = wrap(1, 22);
-  const blue = wrap(34, 39);
-  const green = wrap(32, 39);
-  return {
-    heading: bold,
-    branch: (text) => bold(green(text)),
-    ref: blue,
-    subject: bold,
-    author: green,
-    hash: wrap(2, 22),
-    muted: wrap(2, 22),
-    good: wrap(32, 39),
-    warning: wrap(33, 39),
-    error: wrap(31, 39),
-    selection: (text) => bold(blue(text))
-  };
-}
-var plain = createStyle(false);
-function outputStyle(stream, env = process.env) {
-  return createStyle(Boolean(stream.isTTY) && env.TERM !== "dumb" && !env.NO_COLOR && env.FORCE_COLOR !== "0");
-}
-
-// src/terminal/render.ts
-function safeText(value) {
-  return value.replace(
-    /[\x00-\x1f\x7f-\x9f\u202a-\u202e\u2066-\u2069]/g,
-    (char) => `\\u${char.charCodeAt(0).toString(16).padStart(4, "0")}`
-  );
-}
-function displayPath(path) {
-  const text = path.toString("utf8");
-  if (!Buffer.from(text).equals(path)) return `[path bytes: ${path.toString("hex")}]`;
-  return safeText(text);
-}
-function headLabel(head, style) {
-  return head.kind === "detached" ? `${style.warning("Detached HEAD")} (${style.hash(head.oid.slice(0, 12))})` : head.kind === "unborn" ? `${style.branch(safeText(head.name))} (no commits yet)` : `${style.branch(safeText(head.name))} (${style.hash(head.oid.slice(0, 12))})`;
-}
-function renderUpstream(upstream, style = plain) {
-  if (upstream.kind === "none") return [`Upstream: ${style.muted("not configured")}`];
-  const target = upstream.target;
-  const name = target ? safeText(target.ref) : upstream.kind === "unavailable" && upstream.configured ? safeText(upstream.configured) : "unavailable";
-  const lines = [`Upstream: ${style.ref(name)}${target?.source === "local-branch" ? " (local branch)" : ""}`];
-  if (upstream.kind === "compared") {
-    lines.push(upstream.ahead === 0 && upstream.behind === 0 ? style.good("Matches the local upstream reference.") : `Ahead: ${style.heading(String(upstream.ahead))} commits   Behind: ${style.heading(String(upstream.behind))} commits`);
-  } else lines.push(style.warning(`Comparison unavailable: ${safeText(upstream.message)}`));
-  if (target?.source === "remote-tracking") {
-    lines.push(style.muted("Remote-tracking information is local. Remote freshness unknown; no fetch performed."));
-  }
-  return lines;
-}
-function renderOverview(overview, style = plain) {
-  const { head, changes } = overview;
-  const lines = [
-    style.heading("Repository overview"),
-    `Location: ${safeText(overview.root)}`,
-    `HEAD: ${headLabel(head, style)}`,
-    ...renderUpstream(overview.upstream, style)
-  ];
-  if (overview.shallow) lines.push(style.warning("History: shallow clone; history is incomplete."));
-  if (overview.filtersDisabled) lines.push(style.muted("External clean filters disabled; filtered paths may appear modified."));
-  lines.push("");
-  const groups = [
-    ["Conflicts", changes.filter((c) => c.kind === "conflict")],
-    ["Staged", changes.filter((c) => c.kind !== "conflict" && c.kind !== "untracked" && c.index !== ".")],
-    ["Unstaged", changes.filter((c) => c.kind !== "conflict" && c.kind !== "untracked" && c.worktree !== ".")],
-    ["Untracked", changes.filter((c) => c.kind === "untracked")]
-  ];
-  if (!changes.length) lines.push(`Working tree: ${style.good("clean")} (excluding submodule contents).`);
-  for (const [title, entries] of groups) {
-    if (!entries.length) continue;
-    const emphasize = title === "Conflicts" ? style.error : title === "Staged" ? style.good : style.warning;
-    lines.push(emphasize(`${title}: ${entries.length} ${entries.length === 1 ? "entry" : "entries"}`));
-    for (const entry of entries.slice(0, 30)) {
-      const from = entry.originalPath ? `${displayPath(entry.originalPath)} -> ` : "";
-      lines.push(`  ${emphasize(entry.index + entry.worktree)} ${from}${displayPath(entry.path)}`);
-    }
-    if (entries.length > 30) lines.push(`  ... ${entries.length - 30} more entries`);
-  }
-  lines.push(
-    "",
-    "Untracked directories are grouped. A path can be both staged and unstaged.",
-    "Submodule worktrees are not inspected. No fetch is performed."
-  );
-  return lines.join("\n") + "\n";
-}
-function renderCommit(commit, style = plain) {
-  return [
-    `${style.hash(commit.oid.slice(0, 12))} ${style.subject(safeText(commit.subject) || "(no subject)")}`,
-    `  ${style.author(safeText(commit.author))} | ${style.muted(safeText(commit.committedAt))}${commit.parents.length > 1 ? style.muted(" | merge") : ""}`
-  ];
-}
-function renderHistory(history, style = plain) {
-  const lines = [
-    style.heading("Recent commits"),
-    `Location: ${safeText(history.root)}`,
-    `HEAD: ${headLabel(history.head, style)}`,
-    "History reachable from this HEAD, including merges. Dates are commit dates.",
-    ""
-  ];
-  if (history.head.kind === "unborn") lines.push("No commits yet.");
-  for (const commit of history.commits) {
-    lines.push(...renderCommit(commit, style));
-  }
-  if (history.hasMore) lines.push(`
-Showing ${history.limit} commits; more are available. Use tl log --limit N (up to 100).`);
-  if (history.shallow) lines.push("\n" + style.warning("Shallow repository: only locally available history is shown."));
-  return lines.join("\n") + "\n";
 }
 
 // src/terminal/branches.ts
@@ -3636,19 +3664,68 @@ async function comparisonSession(terminal, operations, inspected, signal) {
         reload = true;
         continue;
       }
+      let detail;
       try {
-        terminal.write("\n" + renderComparisonDetail(comparison, await operations.comparisonDetail(comparison, action), style));
+        detail = await operations.comparisonDetail(comparison, action);
+        terminal.write("\n" + renderComparisonDetail(comparison, detail, style));
       } catch (error) {
         if (signal?.aborted) return;
         terminal.write(style.warning(safeText(error instanceof Error ? error.message : String(error))) + "\n");
       }
-      const next = await terminal.choose("Navigation", [{ name: "Back to comparison", value: "back" }, { name: "Refresh comparison", value: "refresh" }]);
+      let next = await terminal.choose("Navigation", [{ name: "Back to comparison", value: "back" }, { name: "Refresh comparison", value: "refresh" }, ...detail?.kind === "files" && detail.total ? [{ name: "Inspect a file…", value: "file" }] : []]);
+      if (next === "file" && detail?.kind === "files") next = await fileSession(terminal, operations, comparison, detail, signal);
       reload = next === "refresh";
     }
   } catch (error) {
     if (signal?.aborted) return;
     throw error;
   }
+}
+async function fileSession(terminal, operations, comparison, detail, signal) {
+  const style = terminal.style ?? plain;
+  const files = detail.allFiles;
+  let page = 0;
+  let selected;
+  while (!signal?.aborted) {
+    terminal.write(`
+Changed files ${page * 50 + 1}–${Math.min(page * 50 + 50, files.length)} of ${files.length}.
+`);
+    const choice = await terminal.choose("Changed files", [
+      { name: "Back to comparison", value: "back" },
+      { name: "Refresh comparison", value: "refresh" },
+      ...page ? [{ name: "Previous file page", value: "previous" }] : [],
+      ...(page + 1) * 50 < files.length ? [{ name: "Next file page", value: "next" }] : [],
+      ...files.slice(page * 50, page * 50 + 50).map((file) => ({ name: `${file.status} ${file.originalPath ? displayPath(file.originalPath) + " -> " : ""}${displayPath(file.path)}`, value: file.path.toString("hex") }))
+    ], selected);
+    if (choice === "back" || choice === "refresh") return choice;
+    if (choice === "next" || choice === "previous") {
+      page += choice === "next" ? 1 : -1;
+      selected = void 0;
+      continue;
+    }
+    selected = choice;
+    let patch;
+    try {
+      patch = await operations.comparisonPatch(comparison, detail.view, Buffer.from(choice, "hex"));
+    } catch (error) {
+      if (signal?.aborted || isCancellation(error)) throw error;
+      terminal.write(style.warning(safeText(error instanceof Error ? error.message : String(error))) + "\n");
+    }
+    let patchPage = 0;
+    while (!signal?.aborted) {
+      if (patch) terminal.write("\n" + renderPatch(comparison, detail.view, patch, style, patchPage));
+      const action = await terminal.choose("File navigation", [
+        { name: "Back to files", value: "back" },
+        { name: "Refresh comparison", value: "refresh" },
+        ...patchPage ? [{ name: "Previous patch page", value: "previous" }] : [],
+        ...patch && (patchPage + 1) * 80 < patch.lines.length ? [{ name: "Next patch page", value: "next" }] : []
+      ]);
+      if (action === "back") break;
+      if (action === "refresh") return action;
+      patchPage += action === "next" ? 1 : -1;
+    }
+  }
+  return "back";
 }
 
 // src/terminal/session.ts
@@ -3742,15 +3819,15 @@ function parseDiff(data) {
   if (start !== data.length) throw new RepositoryError("Malformed Git file comparison.");
   const result = [];
   for (let i = 0; i < fields2.length; ) {
-    const match = /^:(\d{6}) (\d{6}) [0-9a-f]+ [0-9a-f]+ ([AMDRT])(\d*)$/.exec(fields2[i++].toString("ascii"));
+    const match = /^:(\d{6}) (\d{6}) ([0-9a-f]+) ([0-9a-f]+) ([AMDRT])(\d*)$/.exec(fields2[i++].toString("ascii"));
     const path = fields2[i++];
     if (!match || !path?.length) throw new RepositoryError("Malformed Git file comparison.");
-    const status = match[3];
-    const entry = { status, path, submodule: match[1] === "160000" || match[2] === "160000" };
+    const status = match[5];
+    const entry = { status, path, submodule: match[1] === "160000" || match[2] === "160000", beforeMode: match[1], afterMode: match[2], beforeOid: match[3], afterOid: match[4] };
     if (status === "R") {
       const destination = fields2[i++];
-      const similarity = Number(match[4]);
-      if (!destination?.length || !match[4] || similarity > 100) throw new RepositoryError("Malformed Git rename.");
+      const similarity = Number(match[6]);
+      if (!destination?.length || !match[6] || similarity > 100) throw new RepositoryError("Malformed Git rename.");
       entry.originalPath = path;
       entry.path = destination;
       entry.similarity = similarity;
@@ -3758,6 +3835,37 @@ function parseDiff(data) {
     result.push(entry);
   }
   return result;
+}
+
+// src/core/changes.ts
+async function listSnapshotChanges(root, before, after, signal, run = runGit) {
+  const result = await run(root, ["diff", "--raw", "-z", "--no-abbrev", "--no-ext-diff", "--no-textconv", "--no-relative", "--ignore-submodules=none", "--submodule=short", "--no-renames", "--find-renames=50%", "-l1000", before, after, "--"], signal);
+  if (result.code !== 0) throw new RepositoryError(result.stderr.trim() || "Cannot list snapshot changes.");
+  return parseDiff(result.stdout);
+}
+async function readSnapshotPatch(root, before, after, file, signal, run = runGit) {
+  const base = { file, before, after };
+  if (file.submodule || file.beforeOid === file.afterOid) return { ...base, kind: "metadata", lines: [] };
+  const options = ["diff", "--output-indicator-new=+", "--output-indicator-old=-", "--output-indicator-context= ", "--patch", "--no-color", "--no-ext-diff", "--no-textconv", "--no-renames", "--no-relative", "--word-diff=none", "--unified=3", "--inter-hunk-context=0", "--diff-algorithm=myers", "--no-indent-heuristic", "--src-prefix=a/", "--dst-prefix=b/", "--submodule=short", "--ignore-submodules=none"];
+  const absent = (oid) => /^0+$/.test(oid);
+  let args;
+  if (!absent(file.beforeOid) && !absent(file.afterOid)) {
+    args = [...options, file.beforeOid, file.afterOid, "--"];
+  } else {
+    const name = file.path.toString("utf8");
+    if (!Buffer.from(name).equals(file.path)) throw new RepositoryError("Patch unavailable: added/deleted path is not valid UTF-8. Raw path identity is preserved in the file list.");
+    args = ["--literal-pathspecs", ...options, before, after, "--", name];
+  }
+  const result = await run(root, args, signal);
+  if (result.code !== 0) throw new RepositoryError(result.stderr.trim() || "Cannot read file patch.");
+  if (result.stdout.length > 1024 * 1024) throw new RepositoryError("Patch unavailable: exceeds the 1 MiB display budget. No partial patch is shown.");
+  const text = result.stdout.toString("utf8");
+  if (!Buffer.from(text).equals(result.stdout)) throw new RepositoryError("Patch unavailable: content is not valid UTF-8.");
+  const lines = text.split("\n");
+  if (lines.at(-1) === "") lines.pop();
+  if (lines.some((line) => line.startsWith("Binary files "))) return { ...base, kind: "binary", lines: [] };
+  const start = lines.findIndex((line) => line.startsWith("@@ "));
+  return { ...base, kind: start < 0 ? "metadata" : "text", lines: start < 0 ? [] : lines.slice(start) };
 }
 
 // src/core/comparison.ts
@@ -3821,21 +3929,31 @@ async function readComparisonDetail(comparison, view, signal, run = runGit) {
       if (comparison.bases.value.length !== 1) throw new RepositoryError(comparison.bases.value.length ? "Multiple merge bases; no single base was selected." : "No common ancestor; merge-base comparison is unavailable.");
       before = comparison.bases.value[0];
     }
-    const files = parseDiff(await query(cwd, ["diff", "--raw", "-z", "--no-abbrev", "--no-ext-diff", "--no-textconv", "--no-relative", "--ignore-submodules=none", "--submodule=short", "--no-renames", "--find-renames=50%", "-l1000", before, comparison.b.oid, "--"], signal, run));
-    detail = { kind: "files", view, before, after: comparison.b.oid, files: files.slice(0, 50), total: files.length };
+    const files = await listSnapshotChanges(cwd, before, comparison.b.oid, signal, run);
+    detail = { kind: "files", view, before, after: comparison.b.oid, files: files.slice(0, 50), allFiles: files, total: files.length };
   }
   await verify(cwd, comparison, signal, run);
   return detail;
 }
+async function readComparisonPatch(comparison, view, path, signal, run = runGit) {
+  const detail = await readComparisonDetail(comparison, view, signal, run);
+  if (detail.kind !== "files") throw new RepositoryError("File comparison required.");
+  const file = detail.allFiles.find((file2) => file2.path.equals(path));
+  if (!file) throw new RepositoryError("No changed file with that exact repository-relative path.");
+  const patch = await readSnapshotPatch(comparison.root, detail.before, detail.after, file, signal, run);
+  await verify(comparison.root, comparison, signal, run);
+  return patch;
+}
 
 // src/cli.ts
-var help = `Twiglet 0.4.0 - a small Git repository companion
+var help = `Twiglet 0.5.0 - a small Git repository companion
 
 Usage: tl [--repo <directory>] [status]
        tl [--repo <directory>] log [--limit N]
        tl [--repo <directory>] branches
        tl [--repo <directory>] branch <name>
        tl [--repo <directory>] compare <A> <B> [--view commits-a|commits-b|tips|since-base]
+       tl [--repo <directory>] compare <A> <B> --view tips|since-base --file <path>
        tl --help
        tl --version
 
@@ -3855,6 +3973,7 @@ async function main() {
   let command;
   let comparisonNames;
   let view;
+  let file;
   let branchName;
   let limit;
   let information;
@@ -3881,6 +4000,9 @@ async function main() {
       const value = args[++i];
       if (!value || !["commits-a", "commits-b", "tips", "since-base"].includes(value)) throw new Error("--view requires commits-a, commits-b, tips, or since-base.");
       view = value;
+    } else if (arg === "--file" && file === void 0) {
+      file = args[++i];
+      if (!file) throw new Error("--file requires an exact repository-relative Git path.");
     } else if (arg === "--limit" && limit === void 0) {
       const value = args[++i];
       if (!value || !/^\d+$/.test(value) || Number(value) < 1 || Number(value) > 100) throw new Error("--limit requires an integer from 1 to 100.");
@@ -3890,11 +4012,12 @@ async function main() {
     else throw new Error(`Unknown argument: ${arg}. Use --help for usage.`);
   }
   if (information) {
-    process.stdout.write(information === "help" ? help : "0.4.0\n");
+    process.stdout.write(information === "help" ? help : "0.5.0\n");
     return;
   }
   if (limit !== void 0 && command !== "log") throw new Error("--limit is only supported with log.");
   if (view !== void 0 && command !== "compare") throw new Error("--view is only supported with compare.");
+  if (file !== void 0 && (command !== "compare" || view !== "tips" && view !== "since-base")) throw new Error("--file requires compare with --view tips or since-base.");
   const abort = new AbortController();
   const interrupt = () => abort.abort();
   process.on("SIGINT", interrupt);
@@ -3908,11 +4031,12 @@ async function main() {
       branches: () => listLocalBranches(directory, abort.signal),
       branch: (name) => readBranchDetails(directory, name, abort.signal),
       compare: (a, b) => readComparison(directory, a, b, abort.signal),
+      comparisonPatch: (comparison, view2, path) => readComparisonPatch(comparison, view2, path, abort.signal),
       comparisonDetail: (comparison, view2) => readComparisonDetail(comparison, view2, abort.signal)
     };
     if (command === "compare") {
       const comparison = await operations.compare(...comparisonNames);
-      process.stdout.write(view ? renderComparisonDetail(comparison, await operations.comparisonDetail(comparison, view), style) : renderComparison(comparison, style));
+      process.stdout.write(file !== void 0 ? renderPatch(comparison, view, await operations.comparisonPatch(comparison, view, Buffer.from(file)), style) : view ? renderComparisonDetail(comparison, await operations.comparisonDetail(comparison, view), style) : renderComparison(comparison, style));
     } else if (command === "branches") {
       process.stdout.write(renderBranches(await operations.branches(), style));
     } else if (command === "branch") {

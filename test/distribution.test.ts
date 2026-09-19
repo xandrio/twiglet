@@ -51,7 +51,7 @@ test('candidate checkout can be cloned and run without install, build, or node_m
   assert.equal(explicit.status, 0, explicit.stderr);
   await assertLocation(explicit.stdout, other);
   assert.match(invoke(entry, directory, ['--help']).stdout, /Usage: tl/);
-  assert.equal(invoke(entry, directory, ['--version']).stdout.trim(), '0.4.0');
+  assert.equal(invoke(entry, directory, ['--version']).stdout.trim(), '0.5.0');
   const history = invoke(entry, directory, ['--repo', nested, 'log', '--limit', '1']);
   assert.equal(history.status, 0, history.stderr);
   assert.match(history.stdout, /Initial/);
@@ -73,6 +73,16 @@ test('candidate checkout can be cloned and run without install, build, or node_m
     assert(!result.stdout.includes('\x1b'));
     assert.match(result.stdout, /refs\/heads\/reference/);
   }
+  await writeFile(path.join(other, 'tracked.txt'), 'Patch example\n');
+  fixtureGit(other, 'add', '.'); fixtureGit(other, 'commit', '-m', 'Patch');
+  for (const view of ['tips', 'since-base']) {
+    const patch = invoke(entry, nested, ['compare', 'reference', 'topic', '--view', view, '--file', 'tracked.txt']);
+    assert.equal(patch.status, 0, patch.stderr);
+    assert.match(patch.stdout, /\+Patch example/);
+    assert(!patch.stdout.includes('\x1b'));
+  }
+  assert.equal(invoke(entry, nested, ['compare', 'reference', 'topic', '--file', 'tracked.txt']).status, 1);
+  assert.equal(invoke(entry, nested, ['compare', 'reference', 'topic', '--view', 'tips', '--file', 'missing']).status, 1);
   const unrelated = fixtureGit(other, 'commit-tree', 'HEAD^{tree}', '-m', 'Orphan');
   fixtureGit(other, 'branch', 'unrelated', unrelated);
   assert.equal(invoke(entry, nested, ['compare', 'topic', 'unrelated']).status, 0);
@@ -198,6 +208,8 @@ test('bundled comparison workflow selects branches, opens file views and exits w
   await cp(path.join(project, 'dist', 'twiglet.cjs'), entry);
   const repo = await repository(t);
   fixtureGit(repo, 'branch', 'reference');
+  await writeFile(path.join(repo, 'tracked.txt'), 'Interactive patch\n');
+  fixtureGit(repo, 'add', '.'); fixtureGit(repo, 'commit', '-m', 'Patch');
   const preload = path.join(directory, 'terminal.cjs');
   await writeFile(preload, String.raw`
 const { PassThrough } = require('node:stream');
@@ -208,7 +220,8 @@ Object.defineProperty(process.stdout, 'isTTY', { value: true }); process.stdout.
 const down = n => '\x1b[B'.repeat(n) + '\r';
 const steps = [
   ['? Twiglet', down(2)], ['? Local branches', '\r'], ['? Navigation', down(2)],
-  ['? Reference branch A', down(1)], ['? Comparison\n> Commits only in A', down(2)], ['? Navigation', '\r'],
+  ['? Reference branch A', down(1)], ['? Comparison\n> Commits only in A', down(2)], ['? Navigation', down(2)],
+  ['? Changed files', down(2)], ['? File navigation', '\r'], ['? Changed files', '\x1b[A\x1b[A\r'],
   ['? Comparison\n> Commits only in A', down(3)], ['? Navigation', '\r'], ['? Comparison\n> Commits only in A', down(4)],
   ['? Comparison\n> Commits only in A', down(5)], ['? Comparison\n> Commits only in A', down(6)], ['? Navigation', '\r'],
   ['? Local branches', '\x1b[A\x1b[A\r'], ['? Twiglet', down(1)],
@@ -228,7 +241,7 @@ process.on('exit', () => { if (input.isRaw || phase !== steps.length) process.ex
   assert.equal(result.status, 0, result.stderr + result.stdout);
   assert.match(result.stdout, /Files: A tip → B tip/);
   assert.match(result.stdout, /Files: merge base → B tip/);
-  assert.match(result.stdout, /No committed file differences/);
+  assert.match(result.stdout, /\+Interactive patch/);
 });
 
 test('distribution includes notices and no absolute development paths', async () => {

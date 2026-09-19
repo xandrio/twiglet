@@ -8,7 +8,7 @@ import { listLocalBranches, readBranchDetails } from '../src/core/branches.js';
 import { fixtureGit, repository } from './helpers.js';
 import { readComparison, readComparisonDetail } from '../src/core/comparison.js';
 
-const unusedComparison = { compare: async () => { throw new Error('Unexpected comparison'); }, comparisonDetail: async () => { throw new Error('Unexpected comparison detail'); } };
+const unusedComparison = { comparisonPatch: async () => { throw new Error('Unexpected patch'); }, compare: async () => { throw new Error('Unexpected comparison'); }, comparisonDetail: async () => { throw new Error('Unexpected comparison detail'); } };
 const unusedBranches = { ...unusedComparison, branches: async () => { throw new Error('Unexpected branch list'); }, branch: async () => { throw new Error('Unexpected branch detail'); } };
 
 const overview: Overview = { root: '/repo', head: { kind: 'unborn', name: 'topic' }, upstream: { kind: 'none' }, changes: [], shallow: false, filtersDisabled: false };
@@ -140,6 +140,7 @@ test('comparison navigation swaps captured tips, refreshes and returns to select
     overview: async () => overview, history: async () => history,
     branches: () => listLocalBranches(root), branch: (name) => readBranchDetails(root, name),
     compare: (a, b) => { pairs.push([a, b]); return readComparison(root, a, b); },
+    comparisonPatch: unusedComparison.comparisonPatch,
     comparisonDetail: (comparison, view) => readComparisonDetail(comparison, view),
   });
   assert.deepEqual(pairs, [['topic', 'selected'], ['selected', 'topic']]);

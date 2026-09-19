@@ -79,6 +79,7 @@ tl compare main feature/example
 tl compare main feature/example --view commits-b
 tl compare main feature/example --view tips
 tl compare main feature/example --view since-base
+tl compare main feature/example --view tips --file src/example.ts
 tl --repo /path/to/another/repository
 tl --help
 tl --version
@@ -108,7 +109,8 @@ shows net changes from their single merge base to B's tip. These are different
 endpoints; neither predicts what a merge would produce. A merge base is not
 necessarily the historical branch-creation point. File views show statuses, full
 paths, rename source/destination and similarity, and submodule-pointer labels.
-They show up to 50 changed paths with an exact total; no patch hunks or line counts.
+Direct file lists show up to 50 changed paths with an exact total. Interactive file
+inspection provides pages of 50 paths and patch pages of 80 lines.
 Renames use Git's 50% similarity threshold and an exhaustive-search limit of 1000
 candidates; candidates beyond that limit may remain additions/deletions.
 
@@ -124,6 +126,38 @@ withholds reachability and merge-base conclusions while allowing tip comparison
 when objects exist. Unborn branches require a first commit. A useful partial summary
 exits 0; an explicitly requested view that cannot be produced exits 1 with a reason.
 Ordinary differences exit 0. Independent summary sections remain usable on failure.
+
+## File inspection (Milestone 5)
+
+In either comparison file view, choose **Inspect a file…**, then a changed file.
+Next/Previous file pages reach every change; Back to files retains your selection.
+Patch pages show 80 lines at a time. Refresh comparison captures new tips and clears
+old file selections. All views retain full branch refs and actual before/after IDs.
+
+`tl compare A B --view tips|since-base --file <path>` prints a single file inspection
+without prompts. Use an exact repository-root-relative Git path (forward slashes),
+not a glob: the destination for renames or original path for deletions. This also
+finds changes beyond the first 50 entries. Missing or unavailable patches exit 1;
+binary and metadata-only inspections are successful. Redirected output stays plain.
+
+Text patches use three context lines. The file header preserves modes, blob IDs,
+rename names and similarity. Pure renames and mode-only changes need no content
+hunks; binary files show a notice rather than a binary payload. Submodule changes
+show recorded pointers/modes without visiting submodule contents. Symlink changes
+inspect stored targets, never the files they point to.
+
+Patches are inspection output, not apply-ready exports. Terminal controls and tabs
+are escaped. Non-UTF-8 patch content is unavailable rather than silently replaced;
+non-UTF-8 added/deleted paths cannot currently be queried, but remain identifiable
+by raw bytes in the file list. Modified/renamed content is compared using captured
+blob IDs, preserving the selected rename pairing. These blob comparisons use Git's
+content-based binary detection without path-specific text conversion/diff drivers.
+
+A selected patch exceeding 1 MiB is unavailable; no partial patch is shown. Existing
+15-second and 16 MiB Git-query limits also apply. Patch errors leave the comparison
+session usable. No external helpers, network, checkout, index scan, or repository
+writes are involved. Commit-detail navigation and patch application remain deferred.
+
 
 ## Current scope and limits
 
@@ -222,6 +256,11 @@ cover real commit graphs, independent partial failures, ref changes, file status
 and isolated distribution/navigation. The six-job CI matrix still needs to run for
 this milestone after push; local Windows validation does not confirm other OSes.
 
+Milestone 5 passed all 67 tests, type checking, and distribution freshness checks
+on Windows with Node 22.16.0 and 24.20.0. Isolated distribution tests exercise
+direct file patches and interactive file selection without installation. The
+existing six-job CI matrix still needs to confirm this milestone after push.
+
 ## Direction
 
 Initial areas to explore include:
@@ -259,8 +298,8 @@ For substantial changes, propose a plan for review before implementation. Small,
 well-contained changes can usually be made directly and summarized afterward.
 See [AGENTS.md](AGENTS.md) for practical guidance for coding agents.
 
-Milestone 4 adds explicit local-branch comparison views. A focused file-patch viewer
-is a possible next step after trying comparison in real repositories. Graphs,
+Milestone 5 adds file-patch inspection to explicit local-branch comparisons.
+Commit-detail inspection is a possible next step using the same foundation. Graphs,
 patch-equivalence analysis, and merge-conflict prediction remain outside scope.
 
 ## License

@@ -83,7 +83,8 @@ summaries exit 0, and ordinary differences are successful inspection.
 File inspection uses raw NUL-delimited paths, no external diff/textconv, and explicit
 rename detection (50%, exhaustive limit 1000). Show at most 20 commits or 50 changed
 paths with totals. Submodule pointers are compared without visiting worktrees.
-No patch hunks, graph, remote branches, arbitrary revisions, or merge prediction.
+Milestone 4 itself excludes patch hunks, graphs, remote branches, arbitrary
+revisions, and merge prediction.
 
 ## Collaboration and decisions
 
@@ -132,3 +133,17 @@ Report what changed, the validation performed, and any remaining limitations.
 Distinguish checks actually run from expectations, especially for platforms you
 could not test. Update setup and usage documentation when working commands become
 available, and remove stale statements about the repository's early state.
+
+## Milestone 5 file inspection
+
+`src/core/changes.ts` lists snapshot changes and reads one captured file change's
+patch; comparison wrappers own branch checks and endpoint selection. Retain raw
+paths, blob IDs and modes. Do not re-detect selected rename pairs on narrowed paths.
+Interactive file selection pages contain 50 entries; patch pages contain 80 lines.
+Refresh discards old selection; Back retains it within the captured comparison.
+Direct `compare A B --view tips|since-base --file <path>` uses an exact root-relative
+Git path. Unavailable patches exit 1; binary/metadata-only results exit 0.
+Patch content is bounded to 1 MiB (reject, never silently truncate). No terminal
+escapes belong in core data. Escape controls in presentation, preserve newline
+markers, and keep full refs/IDs. This is inspection, not apply-ready patch export.
+No commit-detail UI or parent-selection policy is implemented yet.

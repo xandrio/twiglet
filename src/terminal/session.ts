@@ -4,6 +4,7 @@ import { renderHistory, renderOverview, safeText } from './render.js';
 import { plain } from './style.js';
 import type { Style } from './style.js';
 import type { Comparison, ComparisonDetail, ComparisonView } from '../core/comparison.js';
+import type { FilePatch } from '../core/changes.js';
 import { comparisonSession } from './comparison.js';
 
 export interface Choice { name: string; value: string; short?: string }
@@ -23,6 +24,7 @@ export interface RepositoryOperations {
   branches(): Promise<BranchList>;
   branch(name: string): Promise<BranchDetails>;
   compare(a: string, b: string): Promise<Comparison>;
+  comparisonPatch(comparison: Comparison, view: 'tips' | 'since-base', path: Buffer): Promise<FilePatch>;
   comparisonDetail(comparison: Comparison, view: ComparisonView): Promise<ComparisonDetail>;
 }
 

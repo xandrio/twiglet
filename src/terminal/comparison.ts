@@ -3,6 +3,8 @@ import { displayPath, renderCommit, safeText } from './render.js';
 import { plain } from './style.js';
 import type { Style } from './style.js';
 import type { RepositoryOperations, Terminal } from './session.js';
+import { renderPatch } from './patch.js';
+import { isCancellation } from './session.js';
 import { branchChoice } from './branches.js';
 
 function endpoints(comparison: Comparison, style: Style): string[] {
@@ -92,16 +94,56 @@ export async function comparisonSession(terminal: Terminal, operations: Reposito
         continue;
       }
       if (action === 'refresh') { reload = true; continue; }
-      try { terminal.write('\n' + renderComparisonDetail(comparison!, await operations.comparisonDetail(comparison!, action as ComparisonView), style)); }
+      let detail: ComparisonDetail | undefined;
+      try { detail = await operations.comparisonDetail(comparison!, action as ComparisonView); terminal.write('\n' + renderComparisonDetail(comparison!, detail, style)); }
       catch (error) {
         if (signal?.aborted) return;
         terminal.write(style.warning(safeText(error instanceof Error ? error.message : String(error))) + '\n');
       }
-      const next = await terminal.choose('Navigation', [{ name: 'Back to comparison', value: 'back' }, { name: 'Refresh comparison', value: 'refresh' }]);
+      let next = await terminal.choose('Navigation', [{ name: 'Back to comparison', value: 'back' }, { name: 'Refresh comparison', value: 'refresh' }, ...(detail?.kind === 'files' && detail.total ? [{ name: 'Inspect a file…', value: 'file' }] : [])]);
+      if (next === 'file' && detail?.kind === 'files') next = await fileSession(terminal, operations, comparison!, detail, signal);
       reload = next === 'refresh';
     }
   } catch (error) {
     if (signal?.aborted) return;
     throw error;
   }
+}
+
+async function fileSession(terminal: Terminal, operations: RepositoryOperations, comparison: Comparison, detail: Extract<ComparisonDetail, {kind: 'files'}>, signal?: AbortSignal): Promise<string> {
+  const style = terminal.style ?? plain;
+  const files = detail.allFiles;
+  let page = 0;
+  let selected: string | undefined;
+  while (!signal?.aborted) {
+    terminal.write(`\nChanged files ${page * 50 + 1}–${Math.min(page * 50 + 50, files.length)} of ${files.length}.\n`);
+    const choice = await terminal.choose('Changed files', [
+      {name:'Back to comparison',value:'back'}, {name:'Refresh comparison',value:'refresh'},
+      ...(page ? [{name:'Previous file page',value:'previous'}] : []),
+      ...((page + 1) * 50 < files.length ? [{name:'Next file page',value:'next'}] : []),
+      ...files.slice(page * 50, page * 50 + 50).map(file => ({name:`${file.status} ${file.originalPath ? displayPath(file.originalPath) + ' -> ' : ''}${displayPath(file.path)}`,value:file.path.toString('hex')})),
+    ], selected);
+    if (choice === 'back' || choice === 'refresh') return choice;
+    if (choice === 'next' || choice === 'previous') { page += choice === 'next' ? 1 : -1; selected = undefined; continue; }
+    selected = choice;
+    let patch;
+    try { patch = await operations.comparisonPatch(comparison, detail.view, Buffer.from(choice, 'hex')); }
+    catch (error) {
+      if (signal?.aborted || isCancellation(error)) throw error;
+      terminal.write(style.warning(safeText(error instanceof Error ? error.message : String(error))) + '\n');
+    }
+    let patchPage = 0;
+    while (!signal?.aborted) {
+      if (patch) terminal.write('\n' + renderPatch(comparison, detail.view, patch, style, patchPage));
+      const action = await terminal.choose('File navigation', [
+        {name:'Back to files',value:'back'}, {name:'Refresh comparison',value:'refresh'},
+        ...(patchPage ? [{name:'Previous patch page',value:'previous'}] : []),
+        ...(patch && (patchPage + 1) * 80 < patch.lines.length ? [{name:'Next patch page',value:'next'}] : []),
+      ]);
+      if (action === 'back') break;
+      if (action === 'refresh') return action;
+      patchPage += action === 'next' ? 1 : -1;
+    }
+  }
+  return 'back';
 }
