@@ -1824,7 +1824,7 @@ function side(value) {
   const data = record(value);
   const nullable = (value2, key) => value2 == null ? null : text(record(value2)[key]);
   const tip = nullable(data.commit, "hash");
-  if (tip !== null && !/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(tip)) throw new ProviderError("invalid-response", "Bitbucket returned an invalid commit ID.");
+  if (tip !== null && (![12, 40, 64].includes(tip.length) || /[^0-9a-f]/.test(tip))) throw new ProviderError("invalid-response", "Bitbucket returned an invalid commit ID.");
   return { repository: nullable(data.repository, "full_name"), branch: nullable(data.branch, "name"), tip };
 }
 async function observePullRequests(setup, branch, signal, transport = fetch) {
@@ -2399,6 +2399,7 @@ async function interactiveSession(terminal, operations, signal) {
 // src/terminal/pr.ts
 function renderPr(pr, style = plain) {
   const value = (value2) => value2 === null ? style.muted("unavailable") : safeText(value2);
+  const tip = (hash) => style.hash(value(hash)) + (hash?.length === 12 ? style.muted(" (abbreviated)") : "");
   return [
     style.heading(`PR #${pr.id}: ${safeText(pr.title)}`),
     `State: ${safeText(pr.state)}`,
@@ -2407,8 +2408,8 @@ function renderPr(pr, style = plain) {
     `Source branch: ${style.ref(value(pr.source.branch))}`,
     `Destination repository: ${value(pr.destination.repository)}`,
     `Destination branch: ${style.ref(value(pr.destination.branch))}`,
-    `PR source tip reported by Bitbucket: ${style.hash(value(pr.source.tip))}`,
-    `PR destination tip reported by Bitbucket: ${style.hash(value(pr.destination.tip))}`,
+    `PR source tip reported by Bitbucket: ${tip(pr.source.tip)}`,
+    `PR destination tip reported by Bitbucket: ${tip(pr.destination.tip)}`,
     style.muted(`Observed at: ${pr.observedAt}`)
   ].join("\n") + "\n";
 }

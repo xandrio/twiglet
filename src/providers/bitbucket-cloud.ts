@@ -1,5 +1,6 @@
 import type { CloudSetup } from '../config/user.js';
 
+/** tip preserves the API hash, which may be a 12-character abbreviation. */
 export interface PrSide { repository: string | null; branch: string | null; tip: string | null }
 export interface CloudPr { id: number; title: string; state: string; url: string; source: PrSide; destination: PrSide; observedAt: string }
 export interface PrObservation { prs: CloudPr[]; complete: boolean; observedAt: string; message?: string }
@@ -19,7 +20,7 @@ function side(value: unknown): PrSide {
   const data = record(value);
   const nullable = (value: unknown, key: string) => value == null ? null : text(record(value)[key]);
   const tip = nullable(data.commit, 'hash');
-  if (tip !== null && !/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(tip)) throw new ProviderError('invalid-response', 'Bitbucket returned an invalid commit ID.');
+  if (tip !== null && (![12, 40, 64].includes(tip.length) || /[^0-9a-f]/.test(tip))) throw new ProviderError('invalid-response', 'Bitbucket returned an invalid commit ID.');
   return { repository: nullable(data.repository, 'full_name'), branch: nullable(data.branch, 'name'), tip };
 }
 

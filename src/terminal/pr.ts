@@ -8,11 +8,12 @@ import type { Style } from './style.js';
 
 export function renderPr(pr: CloudPr, style: Style = plain): string {
   const value = (value: string | null) => value === null ? style.muted('unavailable') : safeText(value);
+  const tip = (hash: string | null) => style.hash(value(hash)) + (hash?.length === 12 ? style.muted(' (abbreviated)') : '');
   return [style.heading(`PR #${pr.id}: ${safeText(pr.title)}`), `State: ${safeText(pr.state)}`, `URL: ${safeText(pr.url)}`,
     `Source repository: ${value(pr.source.repository)}`, `Source branch: ${style.ref(value(pr.source.branch))}`,
     `Destination repository: ${value(pr.destination.repository)}`, `Destination branch: ${style.ref(value(pr.destination.branch))}`,
-    `PR source tip reported by Bitbucket: ${style.hash(value(pr.source.tip))}`,
-    `PR destination tip reported by Bitbucket: ${style.hash(value(pr.destination.tip))}`,
+    `PR source tip reported by Bitbucket: ${tip(pr.source.tip)}`,
+    `PR destination tip reported by Bitbucket: ${tip(pr.destination.tip)}`,
     style.muted(`Observed at: ${pr.observedAt}`)].join('\n') + '\n';
 }
 

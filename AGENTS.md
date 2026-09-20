@@ -171,6 +171,8 @@ no matches, multiple matches, provider failures and successful observations.
 Capture HEAD before checking and discard association if it changes. Report PR API
 tips and per-page observation times without implying live refs, fetch time, or
 atomic remote state. Missing optional PR fields are unavailable, not fabricated.
+PR commit hashes may be 12-character abbreviations: preserve and label them, rather
+than treating them as full local Git object IDs or adding resolution requests.
 
 Credentials come from referenced environment variables; no literal secrets in
 configuration, logs, errors or fixtures. Production API origin is fixed. Reject

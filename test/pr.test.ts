@@ -6,7 +6,7 @@ import { configPath, loadCloudSetup } from '../src/config/user.js';
 import { observePullRequests } from '../src/providers/bitbucket-cloud.js';
 import type { HttpTransport } from '../src/providers/bitbucket-cloud.js';
 import { checkPullRequests, prCheckSucceeded } from '../src/core/pr.js';
-import { renderPrCheck, prSession } from '../src/terminal/pr.js';
+import { renderPr, renderPrCheck, prSession } from '../src/terminal/pr.js';
 import { createStyle } from '../src/terminal/style.js';
 import { stripVTControlCharacters } from 'node:util';
 import { repository, temp, fixtureGit, directoryAlias, snapshot } from './helpers.js';
@@ -66,6 +66,35 @@ test('Cloud matching uses exact branch and repository, all states and complete p
   assert.equal(empty.complete,true); assert.equal(empty.prs.length,0);
   const view={kind:'observed' as const,root:'/repo',branch:'topic',headOid:'a'.repeat(40),repository:'team/repo',observation:empty};
   assert(prCheckSucceeded(view)); assert.match(renderPrCheck(view),/No matching PR/);
+});
+
+test('Cloud PR tips preserve live-response abbreviations without resolving them',async()=>{
+  // Live Cloud PR responses embed commit objects with type "commit" and 12 hex digits.
+  // Synthetic IDs retain that shape without storing live repository data.
+  let calls=0;
+  const result=await observePullRequests(setup,'topic',undefined,async()=>{
+    calls++;
+    return response([{...pr(),
+      source:{...side('topic'),commit:{type:'commit',hash:'012345abcdef'}},
+      destination:{...side('main'),commit:{type:'commit',hash:'fedcba543210'}}}]);
+  });
+  assert.equal(calls,1); assert.equal(result.complete,true);
+  const observed=result.prs[0]!;
+  assert.equal(observed.source.tip,'012345abcdef');
+  assert.equal(observed.destination.tip,'fedcba543210');
+  const output=renderPr(observed);
+  assert.match(output,/source tip reported by Bitbucket: 012345abcdef \(abbreviated\)/);
+  assert.match(output,/destination tip reported by Bitbucket: fedcba543210 \(abbreviated\)/);
+  assert.equal(stripVTControlCharacters(renderPr(observed,createStyle(true))),output);
+  for(const length of [40,64]) {
+    const hash='a'.repeat(length);
+    const full=await observePullRequests(setup,'topic',undefined,async()=>response([{...pr(),source:{...side('topic'),commit:{hash}}}]));
+    assert.equal(full.prs[0]!.source.tip,hash);
+    assert.doesNotMatch(renderPr(full.prs[0]!),/abbreviated/);
+  }
+  for(const hash of ['g'.repeat(12),'a'.repeat(11),'a'.repeat(13),'a'.repeat(65),'012345abcdef\n']) {
+    await assert.rejects(observePullRequests(setup,'topic',undefined,async()=>response([{...pr(),destination:{...side('main'),commit:{hash}}}])),/commit ID/);
+  }
 });
 
 test('HTTP errors, malformed/oversized data and pagination never leak credentials',async()=>{

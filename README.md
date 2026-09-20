@@ -215,7 +215,9 @@ unborn HEAD cannot be associated and makes no API request. HEAD changes during t
 check invalidate the association. No branch, ref, configuration or index is changed.
 
 Each PR shows identity, title, native state, URL, source/destination repository and
-branch, full API-reported source/destination tip IDs, and page observation time.
+branch, API-reported source/destination tip hashes, and page observation time.
+Bitbucket may return 12-character abbreviated hashes; these are labeled as
+abbreviated and preserved without additional requests to resolve full IDs.
 Those tips are PR data, not local remote-tracking refs or independently checked live
 branch tips. Observation time is when Twiglet received data, not a fetch timestamp.
 Pages are separate observations, not an atomic remote snapshot. Missing fields are
@@ -338,8 +340,10 @@ Milestone 6 passed all 73 tests, type checking, and distribution freshness check
 on Windows with Node 22.16.0 and 24.20.0. Tests use fake HTTP responses and disposable
 Git repositories, including isolated bundled direct/interactive online actions and
 offline behavior with broken provider configuration. A stalled fake transport also
-verified the 30-second deadline. Live Bitbucket credentials/API behavior and the
-Windows/macOS/Linux CI matrix still need separate confirmation.
+verified the 30-second deadline. A subsequent live check against a disposable
+Bitbucket repository confirmed PR discovery and exposed 12-character API tip
+hashes; the adapter now preserves and labels these abbreviations. The
+Windows/macOS/Linux CI matrix still needs separate confirmation.
 
 ## Direction
 
