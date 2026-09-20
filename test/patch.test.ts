@@ -51,7 +51,7 @@ test('interactive file and patch pages preserve selection, refresh and cancellat
   const answers=['refs/heads/base','tips','file','next',selected,'next','previous','back',selected,'refresh','back'];
   let captures=0; let output=''; let selections=0;
   const unexpected=async()=>{throw new Error('Unexpected operation');};
-  const operations={overview:unexpected,history:unexpected,branch:unexpected,branches:()=>listLocalBranches(root),
+  const operations={prs:unexpected,overview:unexpected,history:unexpected,branch:unexpected,branches:()=>listLocalBranches(root),
     compare:async(a:string,b:string)=>{captures++;return readComparison(root,a,b);},
     comparisonDetail:readComparisonDetail,comparisonPatch:readComparisonPatch};
   await comparisonSession({write:text=>{output+=text;},choose:async(message,choices,defaultValue)=>{

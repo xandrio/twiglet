@@ -51,7 +51,7 @@ test('candidate checkout can be cloned and run without install, build, or node_m
   assert.equal(explicit.status, 0, explicit.stderr);
   await assertLocation(explicit.stdout, other);
   assert.match(invoke(entry, directory, ['--help']).stdout, /Usage: tl/);
-  assert.equal(invoke(entry, directory, ['--version']).stdout.trim(), '0.5.0');
+  assert.equal(invoke(entry, directory, ['--version']).stdout.trim(), '0.6.0');
   const history = invoke(entry, directory, ['--repo', nested, 'log', '--limit', '1']);
   assert.equal(history.status, 0, history.stderr);
   assert.match(history.stdout, /Initial/);
@@ -185,7 +185,7 @@ process.stdout.write = function(chunk, ...args) {
     setTimeout(() => input.write('\x1b[A\x1b[A\r'), 30);
   } else if (phase === 11 && text.includes('Twiglet')) {
     phase = 12;
-    setTimeout(() => input.write('\x1b[B\r'), 30);
+    setTimeout(() => input.write('\x1b[B\x1b[B\r'), 30);
   }
   return original(chunk, ...args);
 };
@@ -224,7 +224,7 @@ const steps = [
   ['? Changed files', down(2)], ['? File navigation', '\r'], ['? Changed files', '\x1b[A\x1b[A\r'],
   ['? Comparison\n> Commits only in A', down(3)], ['? Navigation', '\r'], ['? Comparison\n> Commits only in A', down(4)],
   ['? Comparison\n> Commits only in A', down(5)], ['? Comparison\n> Commits only in A', down(6)], ['? Navigation', '\r'],
-  ['? Local branches', '\x1b[A\x1b[A\r'], ['? Twiglet', down(1)],
+  ['? Local branches', '\x1b[A\x1b[A\r'], ['? Twiglet', down(2)],
 ];
 let phase = 0;
 const original = process.stdout.write.bind(process.stdout);
@@ -250,4 +250,49 @@ test('distribution includes notices and no absolute development paths', async ()
   assert.match(notices, /@inquirer\/select/);
   assert.match(notices, /Permission is hereby granted/);
   assert(!bundle.includes(project));
+});
+
+test('isolated bundle checks PRs explicitly online, preserves offline status and supports interactive navigation', async t => {
+  const directory = await temp(t); const repo = await repository(t);
+  const entry = path.join(directory, 'twiglet.cjs');
+  await cp(path.join(project, 'dist', 'twiglet.cjs'), entry);
+  await assert.rejects(stat(path.join(directory, 'node_modules')), { code: 'ENOENT' });
+  const config = path.join(directory, 'config.json'); const preload = path.join(directory, 'http.cjs');
+  await writeFile(config, JSON.stringify({ version: 1, bitbucketCloud: { emailEnv: 'TEST_EMAIL', tokenEnv: 'TEST_TOKEN' }, repositories: [{ path: repo, bitbucketCloud: { workspace: 'team', repository: 'repo' } }] }));
+  const env = { ...process.env, TWIGLET_CONFIG: config, TEST_EMAIL: 'account@example.invalid', TEST_TOKEN: 'secret-test-token', TERM: 'xterm', NO_COLOR: '1' };
+  const http = String.raw`
+let calls = 0;
+global.fetch = async (url, options) => {
+  calls++;
+  if (new URL(url).origin !== 'https://api.bitbucket.org' || options.method !== 'GET' || options.redirect !== 'error') throw new Error('Bad request');
+  const side = name => ({ branch: {name}, repository: {full_name:'team/repo'}, commit: {hash:'a'.repeat(40)} });
+  return new Response(JSON.stringify({values:[{id:1,title:'Bundled PR',state:'OPEN',links:{html:{href:'https://bitbucket.org/team/repo/pull-requests/1'}},source:side('topic'),destination:side('main')}]}));
+};
+process.on('exit', () => { if (calls !== Number(process.env.EXPECT_CALLS)) process.exitCode = 9; });
+`;
+  await writeFile(preload, http);
+  const online = invoke(entry, repo, ['pr', '--online'], { ...env, EXPECT_CALLS: '1' }, preload);
+  assert.equal(online.status, 0, online.stderr); assert.match(online.stdout, /Bundled PR/);
+  assert.match(online.stdout, /PR source tip reported by Bitbucket/);
+  assert(!online.stdout.includes(env.TEST_TOKEN)); assert(!online.stdout.includes('\x1b'));
+  const missingFlag = invoke(entry, repo, ['pr'], { ...env, EXPECT_CALLS: '0' }, preload);
+  assert.equal(missingFlag.status, 1); assert.match(missingFlag.stderr, /requires --online/);
+  await writeFile(config, 'broken configuration');
+  assert.equal(invoke(entry, repo, ['status'], { ...env, EXPECT_CALLS: '0' }, preload).status, 0);
+  assert.equal(invoke(entry, repo, ['pr', '--online'], { ...env, EXPECT_CALLS: '0' }, preload).status, 1);
+  await writeFile(config, JSON.stringify({ version: 1, bitbucketCloud: { emailEnv: 'TEST_EMAIL', tokenEnv: 'TEST_TOKEN' }, repositories: [{ path: repo, bitbucketCloud: { workspace: 'team', repository: 'repo' } }] }));
+  await writeFile(preload, http + String.raw`
+const {PassThrough} = require('node:stream');
+const input = new PassThrough(); input.isTTY = true; input.isRaw = false;
+input.setRawMode = raw => {input.isRaw = raw;return input;};
+Object.defineProperty(process,'stdin',{value:input});Object.defineProperty(process.stdout,'isTTY',{value:true});process.stdout.columns=120;
+const steps = [['? Twiglet','\x1b[B\x1b[B\x1b[B\r'],['? Bitbucket PRs','\r'],['? Twiglet','\x1b[B\r']];
+let phase=0;const original=process.stdout.write.bind(process.stdout);
+process.stdout.write=function(chunk,...args){const text=String(chunk).replace(/\x1b\[[0-?]*[ -/]*[@-~]/g,'');
+if(steps[phase] && text.includes(steps[phase][0])) {const key=steps[phase++][1];setTimeout(()=>input.write(key),30);}return original(chunk,...args);};
+process.on('exit',()=>{if(input.isRaw || phase!==steps.length) process.exitCode=9;});
+`);
+  const interactive = invoke(entry, repo, [], { ...env, EXPECT_CALLS: '1' }, preload);
+  assert.equal(interactive.status, 0, interactive.stderr + interactive.stdout);
+  assert.match(interactive.stdout, /Bundled PR/);
 });

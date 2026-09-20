@@ -43,21 +43,21 @@ var require_yoctocolors_cjs = __commonJS({
       const openCode = `\x1B[${open}m`;
       const closeCode = `\x1B[${close}m`;
       return (input) => {
-        const string = input + "";
-        let index = string.indexOf(closeCode);
+        const string2 = input + "";
+        let index = string2.indexOf(closeCode);
         if (index === -1) {
-          return openCode + string + closeCode;
+          return openCode + string2 + closeCode;
         }
         let result = openCode;
         let lastIndex = 0;
         const reopenOnNestedClose = close === 22;
         const replaceCode = (reopenOnNestedClose ? closeCode : "") + openCode;
         while (index !== -1) {
-          result += string.slice(lastIndex, index) + replaceCode;
+          result += string2.slice(lastIndex, index) + replaceCode;
           lastIndex = index + closeCode.length;
-          index = string.indexOf(closeCode, lastIndex);
+          index = string2.indexOf(closeCode, lastIndex);
         }
-        result += string.slice(lastIndex) + closeCode;
+        result += string2.slice(lastIndex) + closeCode;
         return result;
       };
     };
@@ -169,7 +169,7 @@ var require_strip_ansi = __commonJS({
   "node_modules/strip-ansi/index.js"(exports2, module2) {
     "use strict";
     var ansiRegex = require_ansi_regex();
-    module2.exports = (string) => typeof string === "string" ? string.replace(ansiRegex(), "") : string;
+    module2.exports = (string2) => typeof string2 === "string" ? string2.replace(ansiRegex(), "") : string2;
   }
 });
 
@@ -223,18 +223,18 @@ var require_string_width = __commonJS({
     var stripAnsi = require_strip_ansi();
     var isFullwidthCodePoint = require_is_fullwidth_code_point();
     var emojiRegex = require_emoji_regex();
-    var stringWidth = (string) => {
-      if (typeof string !== "string" || string.length === 0) {
+    var stringWidth = (string2) => {
+      if (typeof string2 !== "string" || string2.length === 0) {
         return 0;
       }
-      string = stripAnsi(string);
-      if (string.length === 0) {
+      string2 = stripAnsi(string2);
+      if (string2.length === 0) {
         return 0;
       }
-      string = string.replace(emojiRegex(), "  ");
+      string2 = string2.replace(emojiRegex(), "  ");
       let width = 0;
-      for (let i = 0; i < string.length; i++) {
-        const code = string.codePointAt(i);
+      for (let i = 0; i < string2.length; i++) {
+        const code = string2.codePointAt(i);
         if (code <= 31 || code >= 127 && code <= 159) {
           continue;
         }
@@ -890,8 +890,8 @@ var require_conversions = __commonJS({
     };
     convert.rgb.hex = function(args) {
       const integer = ((Math.round(args[0]) & 255) << 16) + ((Math.round(args[1]) & 255) << 8) + (Math.round(args[2]) & 255);
-      const string = integer.toString(16).toUpperCase();
-      return "000000".substring(string.length) + string;
+      const string2 = integer.toString(16).toUpperCase();
+      return "000000".substring(string2.length) + string2;
     };
     convert.hex.rgb = function(args) {
       const match = args.toString(16).match(/[a-f0-9]{6}|[a-f0-9]{3}/i);
@@ -1071,8 +1071,8 @@ var require_conversions = __commonJS({
     convert.gray.hex = function(gray) {
       const val = Math.round(gray[0] / 100 * 255) & 255;
       const integer = (val << 16) + (val << 8) + val;
-      const string = integer.toString(16).toUpperCase();
-      return "000000".substring(string.length) + string;
+      const string2 = integer.toString(16).toUpperCase();
+      return "000000".substring(string2.length) + string2;
     };
     convert.rgb.gray = function(rgb) {
       const val = (rgb[0] + rgb[1] + rgb[2]) / 3;
@@ -1123,15 +1123,15 @@ var require_route = __commonJS({
       };
     }
     function wrapConversion(toModel, graph) {
-      const path = [graph[toModel].parent, toModel];
+      const path2 = [graph[toModel].parent, toModel];
       let fn = conversions[graph[toModel].parent][toModel];
       let cur = graph[toModel].parent;
       while (graph[cur].parent) {
-        path.unshift(graph[cur].parent);
+        path2.unshift(graph[cur].parent);
         fn = link(conversions[graph[cur].parent][cur], fn);
         cur = graph[cur].parent;
       }
-      fn.conversion = path;
+      fn.conversion = path2;
       return fn;
     }
     module2.exports = function(fromModel) {
@@ -1230,11 +1230,11 @@ var require_ansi_styles = __commonJS({
     };
     var ansi2ansi = (n) => n;
     var rgb2rgb = (r, g, b) => [r, g, b];
-    var setLazyProperty = (object, property, get) => {
-      Object.defineProperty(object, property, {
+    var setLazyProperty = (object2, property, get) => {
+      Object.defineProperty(object2, property, {
         get: () => {
           const value = get();
-          Object.defineProperty(object, property, {
+          Object.defineProperty(object2, property, {
             value,
             enumerable: true,
             configurable: true
@@ -1246,7 +1246,7 @@ var require_ansi_styles = __commonJS({
       });
     };
     var colorConvert;
-    var makeDynamicStyles = (wrap, targetSpace, identity, isBackground) => {
+    var makeDynamicStyles = (wrap, targetSpace, identity2, isBackground) => {
       if (colorConvert === void 0) {
         colorConvert = require_color_convert();
       }
@@ -1255,7 +1255,7 @@ var require_ansi_styles = __commonJS({
       for (const [sourceSpace, suite] of Object.entries(colorConvert)) {
         const name = sourceSpace === "ansi16" ? "ansi" : sourceSpace;
         if (sourceSpace === targetSpace) {
-          styles[name] = wrap(identity, offset);
+          styles[name] = wrap(identity2, offset);
         } else if (typeof suite === "object") {
           styles[name] = wrap(suite[targetSpace], offset);
         }
@@ -1367,7 +1367,7 @@ var require_wrap_ansi = __commonJS({
     ]);
     var END_CODE = 39;
     var wrapAnsi2 = (code) => `${ESCAPES.values().next().value}[${code}m`;
-    var wordLengths = (string) => string.split(" ").map((character) => stringWidth(character));
+    var wordLengths = (string2) => string2.split(" ").map((character) => stringWidth(character));
     var wrapWord = (rows, word, columns) => {
       const characters = [...word];
       let isInsideEscape = false;
@@ -1413,16 +1413,16 @@ var require_wrap_ansi = __commonJS({
       }
       return words.slice(0, last).join(" ") + words.slice(last).join("");
     };
-    var exec = (string, columns, options = {}) => {
-      if (options.trim !== false && string.trim() === "") {
+    var exec = (string2, columns, options = {}) => {
+      if (options.trim !== false && string2.trim() === "") {
         return "";
       }
       let pre = "";
       let ret = "";
       let escapeCode;
-      const lengths = wordLengths(string);
+      const lengths = wordLengths(string2);
       let rows = [""];
-      for (const [index, word] of string.split(" ").entries()) {
+      for (const [index, word] of string2.split(" ").entries()) {
         if (options.trim !== false) {
           rows[rows.length - 1] = rows[rows.length - 1].trimLeft();
         }
@@ -1481,8 +1481,8 @@ var require_wrap_ansi = __commonJS({
       }
       return ret;
     };
-    module2.exports = (string, columns, options) => {
-      return String(string).normalize().replace(/\r\n/g, "\n").split("\n").map((line) => exec(line, columns, options)).join("\n");
+    module2.exports = (string2, columns, options) => {
+      return String(string2).normalize().replace(/\r\n/g, "\n").split("\n").map((line) => exec(line, columns, options)).join("\n");
     };
   }
 });
@@ -1609,15 +1609,360 @@ var require_lib = __commonJS({
   }
 });
 
+// src/core/discovery.ts
+var import_promises = require("node:fs/promises");
+
+// src/git/run.ts
+var import_node_child_process = require("node:child_process");
+
+// src/core/types.ts
+var RepositoryError = class extends Error {
+  constructor(message2, options) {
+    super(message2, options);
+    this.name = "RepositoryError";
+  }
+};
+
+// src/git/run.ts
+var MAX_OUTPUT = 16 * 1024 * 1024;
+function runGit(cwd, args, signal) {
+  const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !/^GIT_/i.test(key)));
+  Object.assign(env, {
+    GIT_OPTIONAL_LOCKS: "0",
+    GIT_NO_LAZY_FETCH: "1",
+    GIT_TERMINAL_PROMPT: "0",
+    GIT_PAGER: "cat",
+    LC_ALL: "C"
+  });
+  return new Promise((resolve, reject) => {
+    const child = (0, import_node_child_process.spawn)("git", [
+      "--no-pager",
+      "-c",
+      "core.fsmonitor=false",
+      "-c",
+      "core.untrackedCache=false",
+      "-c",
+      "color.ui=false",
+      ...args
+    ], { cwd, env, shell: false, windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
+    const out = [];
+    const err = [];
+    let size = 0;
+    let failure;
+    const stop = (message2) => {
+      failure ??= new RepositoryError(message2);
+      child.kill();
+    };
+    const abort = () => stop("Repository inspection cancelled.");
+    signal?.addEventListener("abort", abort, { once: true });
+    if (signal?.aborted) abort();
+    const timer = setTimeout(() => stop("Git inspection timed out after 15 seconds."), 15e3);
+    const collect = (chunks) => (chunk) => {
+      size += chunk.length;
+      if (size > MAX_OUTPUT) stop("Git output exceeded the 16 MiB inspection limit.");
+      else chunks.push(chunk);
+    };
+    child.stdout.on("data", collect(out));
+    child.stderr.on("data", collect(err));
+    child.on("error", (error) => {
+      failure = new RepositoryError(error.code === "ENOENT" ? "Could not start Git. Check that Git is on PATH and the repository directory exists." : `Could not start Git: ${error.message}`, { cause: error });
+    });
+    child.on("close", (code) => {
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", abort);
+      if (failure) reject(failure);
+      else resolve({ code: code ?? -1, stdout: Buffer.concat(out), stderr: Buffer.concat(err).toString("utf8") });
+    });
+  });
+}
+async function git(cwd, args, signal) {
+  const result = await runGit(cwd, args, signal);
+  if (result.code !== 0) {
+    throw new RepositoryError(result.stderr.trim() || `Git ${args[0]} failed (exit ${result.code}).`);
+  }
+  return result.stdout;
+}
+
+// src/core/discovery.ts
+async function discover(directory, signal) {
+  let cwd;
+  try {
+    cwd = await (0, import_promises.realpath)(directory);
+  } catch {
+    throw new RepositoryError(`Repository directory does not exist or cannot be accessed: ${directory}`);
+  }
+  const bare = (await git(cwd, ["rev-parse", "--is-bare-repository"], signal)).toString().trim();
+  if (bare === "true") throw new RepositoryError("Bare repositories are not supported yet. Open a working tree.");
+  const root = (await git(cwd, ["rev-parse", "--show-toplevel"], signal)).toString("utf8").replace(/\r?\n$/, "");
+  const partial = await runGit(cwd, ["config", "--get-regexp", String.raw`^(extensions\.partialclone|remote\..*\.promisor)$`], signal);
+  if (partial.code !== 0 && partial.code !== 1) throw new RepositoryError(partial.stderr.trim() || "Cannot inspect Git configuration.");
+  if (partial.code === 0) throw new RepositoryError("Partial-clone configuration detected. Inspection is not supported yet to avoid fetching missing objects.");
+  const shallow = (await git(cwd, ["rev-parse", "--is-shallow-repository"], signal)).toString().trim() === "true";
+  return { cwd, root, shallow };
+}
+async function readHead(cwd, signal, run = runGit) {
+  const symbolic = async () => {
+    const result = await run(cwd, ["symbolic-ref", "--quiet", "HEAD"], signal);
+    if (result.code === 1) return void 0;
+    if (result.code !== 0) throw new RepositoryError(result.stderr.trim() || "Cannot resolve HEAD.");
+    const ref = result.stdout.toString("utf8").trim();
+    if (!ref.startsWith("refs/heads/")) throw new RepositoryError("HEAD does not refer to a local branch.");
+    return ref;
+  };
+  const before = await symbolic();
+  const commit = await run(cwd, ["rev-parse", "--verify", "--quiet", "HEAD^{commit}"], signal);
+  const after = await symbolic();
+  if (before !== after) throw new RepositoryError("HEAD changed during inspection. Refresh to try again.");
+  if (commit.code === 0) {
+    const oid = commit.stdout.toString("ascii").trim();
+    if (!/^[0-9a-f]+$/.test(oid)) throw new RepositoryError("Git returned an invalid HEAD object ID.");
+    return before ? { kind: "branch", name: before.slice(11), oid } : { kind: "detached", oid };
+  }
+  if (commit.code === 1 && before) {
+    const ref = await run(cwd, ["show-ref", "--verify", "--quiet", before], signal);
+    if (ref.code === 1) return { kind: "unborn", name: before.slice(11) };
+  }
+  throw new RepositoryError(commit.stderr.trim() || "HEAD commit is unavailable.");
+}
+function sameHead(a, b) {
+  return a.kind === b.kind && ("name" in a ? a.name : void 0) === ("name" in b ? b.name : void 0) && ("oid" in a ? a.oid : void 0) === ("oid" in b ? b.oid : void 0);
+}
+
+// src/config/user.ts
+var import_promises2 = require("node:fs/promises");
+var import_node_os = require("node:os");
+var import_node_path = __toESM(require("node:path"), 1);
+var ConfigurationError = class extends Error {
+};
+function configPath(env = process.env, platform = process.platform, home = (0, import_node_os.homedir)()) {
+  return env.TWIGLET_CONFIG || (platform === "win32" ? import_node_path.default.join(env.APPDATA || import_node_path.default.join(home, "AppData", "Roaming"), "Twiglet", "config.json") : import_node_path.default.join(env.XDG_CONFIG_HOME || import_node_path.default.join(home, ".config"), "twiglet", "config.json"));
+}
+function object(value, keys, field) {
+  if (!value || typeof value !== "object" || Array.isArray(value) || Object.keys(value).some((key) => !keys.includes(key))) {
+    throw new ConfigurationError(`Invalid configuration at ${field}: expected an object with documented fields only.`);
+  }
+  return value;
+}
+function string(value, field) {
+  if (typeof value !== "string" || !value.length || /[\x00-\x1f\x7f]/.test(value)) throw new ConfigurationError(`Invalid configuration at ${field}.`);
+  return value;
+}
+var identity = (value) => process.platform === "win32" ? value.toLowerCase() : value;
+async function loadCloudSetup(root, env = process.env) {
+  let text2;
+  try {
+    const filename = configPath(env);
+    if ((await (0, import_promises2.stat)(filename)).size > 256 * 1024) throw new ConfigurationError("Configuration exceeds 256 KiB.");
+    text2 = await (0, import_promises2.readFile)(filename, "utf8");
+    if (Buffer.byteLength(text2) > 256 * 1024) throw new ConfigurationError("Configuration exceeds 256 KiB.");
+  } catch (error) {
+    if (error.code === "ENOENT") return void 0;
+    if (error instanceof ConfigurationError) throw error;
+    throw new ConfigurationError("Cannot read user configuration.");
+  }
+  let json;
+  try {
+    json = JSON.parse(text2);
+  } catch {
+    throw new ConfigurationError("User configuration is not valid JSON.");
+  }
+  const config = object(json, ["version", "bitbucketCloud", "repositories"], "root");
+  if (config.version !== 1) throw new ConfigurationError("Unsupported configuration version; expected 1.");
+  const auth = object(config.bitbucketCloud, ["emailEnv", "tokenEnv"], "bitbucketCloud");
+  const emailEnv = string(auth.emailEnv, "bitbucketCloud.emailEnv");
+  const tokenEnv = string(auth.tokenEnv, "bitbucketCloud.tokenEnv");
+  if (![emailEnv, tokenEnv].every((name) => /^[A-Za-z_][A-Za-z0-9_]*$/.test(name))) throw new ConfigurationError("Credential references must be environment-variable names.");
+  if (!Array.isArray(config.repositories)) throw new ConfigurationError("repositories must be an array.");
+  const actual = identity(await (0, import_promises2.realpath)(root));
+  const seen = /* @__PURE__ */ new Set();
+  let mapping;
+  for (const [index, value] of config.repositories.entries()) {
+    const field = `repositories[${index}]`;
+    const row = object(value, ["path", "bitbucketCloud"], field);
+    const local = string(row.path, `${field}.path`);
+    if (!import_node_path.default.isAbsolute(local)) throw new ConfigurationError(`${field}.path must be absolute.`);
+    const cloud = object(row.bitbucketCloud, ["workspace", "repository"], `${field}.bitbucketCloud`);
+    const workspace = string(cloud.workspace, `${field}.bitbucketCloud.workspace`);
+    const repository = string(cloud.repository, `${field}.bitbucketCloud.repository`);
+    if (![workspace, repository].every((part) => /^[A-Za-z0-9_-]+$/.test(part))) throw new ConfigurationError(`${field}.bitbucketCloud requires workspace/repository slugs.`);
+    let canonical;
+    try {
+      canonical = identity(await (0, import_promises2.realpath)(local));
+    } catch (error) {
+      if (error.code !== "ENOENT") throw new ConfigurationError(`Cannot resolve ${field}.path.`);
+      canonical = identity(import_node_path.default.normalize(local));
+    }
+    if (seen.has(canonical)) throw new ConfigurationError("Duplicate repository mappings.");
+    seen.add(canonical);
+    if (canonical === actual) mapping = { workspace, repository };
+  }
+  if (!mapping) return void 0;
+  const email = env[emailEnv];
+  const token = env[tokenEnv];
+  if (!email || !token) throw new ConfigurationError("Missing credentials: set the environment variables referenced by bitbucketCloud.emailEnv and tokenEnv.");
+  if (/[\r\n:]/.test(email) || /[\r\n]/.test(token)) throw new ConfigurationError("Invalid credential environment values.");
+  return { mapping, email, token };
+}
+
+// src/providers/bitbucket-cloud.ts
+var ProviderError = class extends Error {
+  constructor(kind, message2) {
+    super(message2);
+    this.kind = kind;
+  }
+  kind;
+};
+function record(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new ProviderError("invalid-response", "Bitbucket returned an invalid response.");
+  return value;
+}
+function text(value) {
+  if (typeof value !== "string" || !value.length) throw new ProviderError("invalid-response", "Bitbucket returned an invalid response.");
+  return value;
+}
+function side(value) {
+  const data = record(value);
+  const nullable = (value2, key) => value2 == null ? null : text(record(value2)[key]);
+  const tip = nullable(data.commit, "hash");
+  if (tip !== null && !/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(tip)) throw new ProviderError("invalid-response", "Bitbucket returned an invalid commit ID.");
+  return { repository: nullable(data.repository, "full_name"), branch: nullable(data.branch, "name"), tip };
+}
+async function observePullRequests(setup, branch, signal, transport = fetch) {
+  const repository = `${setup.mapping.workspace}/${setup.mapping.repository}`;
+  const endpoint = `/2.0/repositories/${encodeURIComponent(setup.mapping.workspace)}/${encodeURIComponent(setup.mapping.repository)}/pullrequests`;
+  let url = new URL(`https://api.bitbucket.org${endpoint}`);
+  url.searchParams.set("q", `source.branch.name = ${JSON.stringify(branch)}`);
+  for (const state of ["OPEN", "MERGED", "DECLINED", "SUPERSEDED"]) url.searchParams.append("state", state);
+  url.searchParams.set("pagelen", "50");
+  const authorization = `Basic ${Buffer.from(`${setup.email}:${setup.token}`).toString("base64")}`;
+  const redact = (value) => [authorization, authorization.slice(6), setup.token, setup.email].reduce((text2, secret) => text2.replaceAll(secret, "[redacted]"), value);
+  const deadline = AbortSignal.timeout(3e4);
+  const requestSignal = signal ? AbortSignal.any([signal, deadline]) : deadline;
+  const prs = [];
+  const seenPages = /* @__PURE__ */ new Set();
+  const seenPrs = /* @__PURE__ */ new Set();
+  let observedAt = "";
+  let unresolved = false;
+  for (let page = 0; page < 10; page++) {
+    if (url.origin !== "https://api.bitbucket.org" || url.pathname !== endpoint || url.username || url.password || url.hash || seenPages.has(url.href)) {
+      throw new ProviderError("invalid-response", "Bitbucket returned an unsafe or repeated pagination URL.");
+    }
+    seenPages.add(url.href);
+    let response;
+    let data;
+    try {
+      requestSignal.throwIfAborted();
+      response = await transport(url, { method: "GET", headers: { Authorization: authorization, Accept: "application/json" }, redirect: "error", signal: requestSignal });
+      if (!response.ok) {
+        await response.body?.cancel();
+        if (response.status === 401) throw new ProviderError("authentication", "Bitbucket authentication failed. Check API-token credentials.");
+        if (response.status === 403 || response.status === 404) throw new ProviderError("access", "Bitbucket repository is inaccessible or unavailable. Check mapping, permissions and token scopes.");
+        if (response.status === 429) throw new ProviderError("rate-limit", "Bitbucket rate limit reached. Try again later.");
+        throw new ProviderError("network", `Bitbucket request failed (HTTP ${response.status}).`);
+      }
+      if (!response.body) throw new ProviderError("invalid-response", "Bitbucket returned an empty response.");
+      const reader = response.body.getReader();
+      const chunks = [];
+      let size = 0;
+      try {
+        while (true) {
+          requestSignal.throwIfAborted();
+          const part = await reader.read();
+          if (part.done) break;
+          size += part.value.byteLength;
+          if (size > 1024 * 1024) throw new ProviderError("invalid-response", "Bitbucket response exceeds the 1 MiB page limit.");
+          chunks.push(part.value);
+        }
+      } finally {
+        await reader.cancel();
+      }
+      try {
+        data = record(JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(Buffer.concat(chunks))));
+      } catch {
+        throw new ProviderError("invalid-response", "Bitbucket returned invalid JSON data.");
+      }
+    } catch (error) {
+      if (signal?.aborted) throw error;
+      if (error instanceof ProviderError) throw error;
+      throw new ProviderError("network", deadline.aborted ? "Bitbucket check timed out after 30 seconds." : "Bitbucket network request failed.");
+    }
+    observedAt = (/* @__PURE__ */ new Date()).toISOString();
+    if (!Array.isArray(data.values) || data.values.length > 50) throw new ProviderError("invalid-response", "Bitbucket returned an invalid PR page.");
+    for (const raw of data.values) {
+      const pr = record(raw);
+      const source = side(pr.source);
+      const destination = side(pr.destination);
+      if (source.branch === null) {
+        unresolved = true;
+        continue;
+      }
+      if (source.branch !== branch) continue;
+      if (!source.repository) {
+        unresolved = true;
+        continue;
+      }
+      if (source.repository.toLowerCase() !== repository.toLowerCase()) continue;
+      if (destination.repository !== null && destination.repository.toLowerCase() !== repository.toLowerCase()) {
+        unresolved = true;
+        continue;
+      }
+      if (!Number.isSafeInteger(pr.id) || Number(pr.id) <= 0) throw new ProviderError("invalid-response", "Bitbucket returned an invalid PR identity.");
+      const id = Number(pr.id);
+      if (seenPrs.has(id)) {
+        unresolved = true;
+        continue;
+      }
+      seenPrs.add(id);
+      const html = text(record(record(pr.links).html).href);
+      let link;
+      try {
+        link = new URL(html);
+      } catch {
+        throw new ProviderError("invalid-response", "Bitbucket returned an invalid PR URL.");
+      }
+      if (link.origin !== "https://bitbucket.org" || link.username || link.password) throw new ProviderError("invalid-response", "Bitbucket returned an invalid PR URL.");
+      const cleanSide = (value) => ({ repository: value.repository && redact(value.repository), branch: value.branch && redact(value.branch), tip: value.tip && redact(value.tip) });
+      prs.push({ id, title: redact(text(pr.title)), state: redact(text(pr.state)), url: redact(html), source: cleanSide(source), destination: cleanSide(destination), observedAt });
+    }
+    if (!data.next) return { prs, complete: !unresolved, observedAt, ...unresolved ? { message: "Some matching PR identities could not be established; the search is incomplete." } : {} };
+    try {
+      url = new URL(text(data.next));
+    } catch {
+      throw new ProviderError("invalid-response", "Bitbucket returned an invalid pagination URL.");
+    }
+  }
+  return { prs, complete: false, observedAt, message: "Search stopped at the 10-page limit; additional matches may exist." };
+}
+
+// src/core/pr.ts
+async function checkPullRequests(directory, signal, env = process.env, transport) {
+  const { cwd, root } = await discover(directory, signal);
+  const head = await readHead(cwd, signal);
+  if (head.kind !== "branch") return { kind: "local-context", message: head.kind === "detached" ? "Detached HEAD: select a local branch before checking PRs." : "Unborn branch: a committed local branch is required to check PRs." };
+  try {
+    const setup = await loadCloudSetup(root, env);
+    if (!setup) return { kind: "not-configured", message: "Bitbucket Cloud is not configured for this worktree. Add an explicit mapping in user configuration." };
+    const observation = await observePullRequests(setup, head.name, signal, transport);
+    if (!sameHead(head, await readHead(cwd, signal))) return { kind: "local-context", message: "HEAD changed during the check. Check again to associate PRs with the current branch." };
+    return { kind: "observed", root, branch: head.name, headOid: head.oid, repository: `${setup.mapping.workspace}/${setup.mapping.repository}`, observation };
+  } catch (error) {
+    if (signal?.aborted) throw error;
+    if (error instanceof ConfigurationError) return { kind: "configuration", message: error.message };
+    if (error instanceof ProviderError) return { kind: "provider", message: `${error.kind}: ${error.message}` };
+    throw error;
+  }
+}
+var prCheckSucceeded = (check) => check.kind === "observed" && check.observation.complete;
+
 // src/terminal/style.ts
 function createStyle(enabled) {
-  const wrap = (open, close) => (text) => enabled && text ? `\x1B[${open}m${text}\x1B[${close}m` : text;
+  const wrap = (open, close) => (text2) => enabled && text2 ? `\x1B[${open}m${text2}\x1B[${close}m` : text2;
   const bold = wrap(1, 22);
   const blue = wrap(34, 39);
   const green = wrap(32, 39);
   return {
     heading: bold,
-    branch: (text) => bold(green(text)),
+    branch: (text2) => bold(green(text2)),
     ref: blue,
     subject: bold,
     author: green,
@@ -1626,7 +1971,7 @@ function createStyle(enabled) {
     good: wrap(32, 39),
     warning: wrap(33, 39),
     error: wrap(31, 39),
-    selection: (text) => bold(blue(text))
+    selection: (text2) => bold(blue(text2))
   };
 }
 var plain = createStyle(false);
@@ -1641,10 +1986,10 @@ function safeText(value) {
     (char) => `\\u${char.charCodeAt(0).toString(16).padStart(4, "0")}`
   );
 }
-function displayPath(path) {
-  const text = path.toString("utf8");
-  if (!Buffer.from(text).equals(path)) return `[path bytes: ${path.toString("hex")}]`;
-  return safeText(text);
+function displayPath(path2) {
+  const text2 = path2.toString("utf8");
+  if (!Buffer.from(text2).equals(path2)) return `[path bytes: ${path2.toString("hex")}]`;
+  return safeText(text2);
 }
 function headLabel(head, style) {
   return head.kind === "detached" ? `${style.warning("Detached HEAD")} (${style.hash(head.oid.slice(0, 12))})` : head.kind === "unborn" ? `${style.branch(safeText(head.name))} (no commits yet)` : `${style.branch(safeText(head.name))} (${style.hash(head.oid.slice(0, 12))})`;
@@ -1721,6 +2066,48 @@ Showing ${history.limit} commits; more are available. Use tl log --limit N (up t
   return lines.join("\n") + "\n";
 }
 
+// src/terminal/branches.ts
+function trackingLabel(branch, style) {
+  const tracking = branch.tracking;
+  if (tracking.kind === "none") return style.muted("no upstream");
+  if (tracking.kind === "unavailable") return style.warning(`tracking unavailable: ${safeText(tracking.message)}`);
+  return `${style.ref(safeText(tracking.target.ref))}${tracking.target.source === "local-branch" ? " (local branch)" : ""}${tracking.available ? "" : style.warning(" (missing locally)")}`;
+}
+function branchChoice(branch, style = plain) {
+  const subject = safeText(branch.tip?.subject ?? "No commits yet");
+  return `${branch.current ? style.good("* ") : ""}${(branch.current ? style.branch : style.ref)(safeText(branch.name))} | ${style.muted(safeText(branch.tip?.committedAt.slice(0, 10) ?? "unborn"))} | ${style.subject(subject.length > 50 ? subject.slice(0, 47) + "..." : subject)} | ${trackingLabel(branch, style)}`;
+}
+function renderBranchContext(list, style = plain) {
+  return `${style.heading("Local branches")}
+Location: ${safeText(list.root)}
+${list.head.kind === "detached" ? style.warning("HEAD is detached.") : `Current branch: ${style.branch(safeText(list.head.name))}`}
+* Current in this worktree. Dates are tip commit dates, not branch usage dates.
+Remote-tracking information is local; remote freshness unknown. No fetch performed.
+`;
+}
+function renderBranches(list, style = plain) {
+  return renderBranchContext(list, style) + "\n" + (list.branches.length ? list.branches.map((branch) => branchChoice(branch, style)).join("\n") : "No local branches.") + "\n";
+}
+function renderBranchDetails(details, style = plain) {
+  const { branch, history } = details;
+  const lines = [
+    style.heading("Branch details"),
+    `Location: ${safeText(details.root)}`,
+    `Branch: ${(branch.current ? style.branch : style.ref)(safeText(branch.name))}${branch.current ? " (current in this worktree)" : ""}`,
+    style.muted("Inspection only; no branch is checked out and no working-tree status is shown.")
+  ];
+  if (branch.tip) lines.push(`Tip: ${style.hash(branch.tip.oid)}`, `Subject: ${style.subject(safeText(branch.tip.subject))}`, `Author: ${style.author(safeText(branch.tip.author))}`, `Tip commit date: ${style.muted(safeText(branch.tip.committedAt))}`);
+  else lines.push("No commits yet.");
+  lines.push(...renderUpstream(details.upstream, style), "", style.heading("Recent commits reachable from this branch, including merges:"));
+  if (history.kind === "unavailable") lines.push(style.warning(`History unavailable: ${safeText(history.message)}`));
+  else {
+    for (const commit of history.commits) lines.push(...renderCommit(commit, style));
+    if (history.hasMore) lines.push("Showing the latest 20 reachable commits; more are available.");
+  }
+  if (details.shallow) lines.push(style.warning("Shallow repository: history is incomplete."));
+  return lines.join("\n") + "\n";
+}
+
 // src/terminal/patch.ts
 function renderPatch(comparison, view, patch, style = plain, page) {
   const { file } = patch;
@@ -1741,101 +2128,356 @@ function renderPatch(comparison, view, patch, style = plain, page) {
   else {
     const start = page === void 0 ? 0 : page * 80;
     for (const line of patch.lines.slice(start, page === void 0 ? void 0 : start + 80)) {
-      const text = safeText(line);
-      lines.push(line.startsWith("@@ ") ? style.ref(text) : line.startsWith("+") ? style.good(text) : line.startsWith("-") ? style.warning(text) : text);
+      const text2 = safeText(line);
+      lines.push(line.startsWith("@@ ") ? style.ref(text2) : line.startsWith("+") ? style.good(text2) : line.startsWith("-") ? style.warning(text2) : text2);
     }
     if (page !== void 0) lines.push("", style.muted(`Patch lines ${start + 1}–${Math.min(start + 80, patch.lines.length)} of ${patch.lines.length}.`));
   }
   return lines.join("\n") + "\n";
 }
 
-// src/git/run.ts
-var import_node_child_process = require("node:child_process");
-
-// src/core/types.ts
-var RepositoryError = class extends Error {
-  constructor(message2, options) {
-    super(message2, options);
-    this.name = "RepositoryError";
-  }
-};
-
-// src/git/run.ts
-var MAX_OUTPUT = 16 * 1024 * 1024;
-function runGit(cwd, args, signal) {
-  const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !/^GIT_/i.test(key)));
-  Object.assign(env, {
-    GIT_OPTIONAL_LOCKS: "0",
-    GIT_NO_LAZY_FETCH: "1",
-    GIT_TERMINAL_PROMPT: "0",
-    GIT_PAGER: "cat",
-    LC_ALL: "C"
-  });
-  return new Promise((resolve, reject) => {
-    const child = (0, import_node_child_process.spawn)("git", [
-      "--no-pager",
-      "-c",
-      "core.fsmonitor=false",
-      "-c",
-      "core.untrackedCache=false",
-      "-c",
-      "color.ui=false",
-      ...args
-    ], { cwd, env, shell: false, windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
-    const out = [];
-    const err = [];
-    let size = 0;
-    let failure;
-    const stop = (message2) => {
-      failure ??= new RepositoryError(message2);
-      child.kill();
-    };
-    const abort = () => stop("Repository inspection cancelled.");
-    signal?.addEventListener("abort", abort, { once: true });
-    if (signal?.aborted) abort();
-    const timer = setTimeout(() => stop("Git inspection timed out after 15 seconds."), 15e3);
-    const collect = (chunks) => (chunk) => {
-      size += chunk.length;
-      if (size > MAX_OUTPUT) stop("Git output exceeded the 16 MiB inspection limit.");
-      else chunks.push(chunk);
-    };
-    child.stdout.on("data", collect(out));
-    child.stderr.on("data", collect(err));
-    child.on("error", (error) => {
-      failure = new RepositoryError(error.code === "ENOENT" ? "Could not start Git. Check that Git is on PATH and the repository directory exists." : `Could not start Git: ${error.message}`, { cause: error });
-    });
-    child.on("close", (code) => {
-      clearTimeout(timer);
-      signal?.removeEventListener("abort", abort);
-      if (failure) reject(failure);
-      else resolve({ code: code ?? -1, stdout: Buffer.concat(out), stderr: Buffer.concat(err).toString("utf8") });
-    });
-  });
+// src/terminal/comparison.ts
+function endpoints(comparison, style) {
+  return [
+    `${style.selection("A")} (reference): ${style.ref(safeText(comparison.a.ref))} ${style.hash(comparison.a.oid)}`,
+    `${style.selection("B")} (inspected): ${style.ref(safeText(comparison.b.ref))} ${style.hash(comparison.b.oid)}`
+  ];
 }
-async function git(cwd, args, signal) {
-  const result = await runGit(cwd, args, signal);
-  if (result.code !== 0) {
-    throw new RepositoryError(result.stderr.trim() || `Git ${args[0]} failed (exit ${result.code}).`);
+function count(value, style) {
+  return value === 0 ? style.muted(String(value)) : style.selection(String(value));
+}
+function renderComparison(comparison, style = plain) {
+  const lines = [style.heading("Branch comparison"), `Location: ${safeText(comparison.root)}`, ...endpoints(comparison, style), ""];
+  if (comparison.counts.kind === "available") lines.push(`Only in A: ${count(comparison.counts.value.a, style)} commits`, `Only in B: ${count(comparison.counts.value.b, style)} commits`);
+  else lines.push(style.warning(comparison.counts.message));
+  if (comparison.bases.kind === "unavailable") lines.push(style.warning(comparison.bases.message));
+  else if (!comparison.bases.value.length) lines.push(`Merge base: ${style.warning("none (unrelated histories).")}`);
+  else if (comparison.bases.value.length === 1) lines.push(`Merge base: ${style.hash(comparison.bases.value[0])}`);
+  else lines.push(style.warning("Multiple merge bases; no single base selected:"), ...comparison.bases.value.map((id) => `  ${style.hash(id)}`));
+  lines.push(
+    "",
+    style.muted("Unique commits describe reachability, not patch equivalence. File views compare committed snapshots."),
+    style.muted("No checkout, working-tree comparison, fetch, or prediction of a merge result.")
+  );
+  return lines.join("\n") + "\n";
+}
+function renderComparisonDetail(comparison, detail, style = plain) {
+  const title = detail.kind === "commits" ? `Commits only in ${detail.side.toUpperCase()}` : detail.view === "tips" ? "Files: A tip → B tip" : "Files: merge base → B tip";
+  const lines = [style.heading(title), ...endpoints(comparison, style)];
+  if (detail.kind === "commits") {
+    lines.push(style.muted("Reachable only from this side, including merges; patch-equivalent commits are not excluded."), "", `Total: ${count(detail.total, style)} commits`, "");
+    for (const commit of detail.commits) lines.push(...renderCommit(commit, style));
+    if (!detail.total) lines.push("No unique commits on this side.");
+    if (detail.total > detail.commits.length) lines.push("", style.muted(`Showing ${detail.commits.length} of ${detail.total} commits.`));
+  } else {
+    lines.push(
+      `Before: ${style.hash(detail.before)}`,
+      `After: ${style.hash(detail.after)}`,
+      style.muted(detail.view === "tips" ? "Changes to transform the A snapshot into the B snapshot." : "Net changes from the common ancestor snapshot to B; not a predicted merge result."),
+      "",
+      `Changed paths: ${count(detail.total, style)}`,
+      ""
+    );
+    for (const file of detail.files) {
+      const from = file.originalPath ? `${displayPath(file.originalPath)} -> ` : "";
+      const statusStyle = file.status === "A" ? style.good : file.status === "R" ? style.ref : style.warning;
+      lines.push(`  ${style.heading(statusStyle(file.status))} ${from}${displayPath(file.path)}${file.similarity !== void 0 ? style.muted(` (${file.similarity}% similarity)`) : ""}${file.submodule ? style.muted(" [submodule pointer]") : ""}`);
+    }
+    if (!detail.total) lines.push("No committed file differences between these endpoints.");
+    if (detail.total > detail.files.length) lines.push("", style.muted(`Showing ${detail.files.length} of ${detail.total} changed paths.`));
+    lines.push(
+      "",
+      style.muted("A added · M modified · D deleted · R renamed · T type changed."),
+      style.muted("Renames: Git similarity ≥50%, exhaustive search limited to 1000 candidates.")
+    );
   }
-  return result.stdout;
+  return lines.join("\n") + "\n";
+}
+async function comparisonSession(terminal, operations, inspected, signal) {
+  const style = terminal.style ?? plain;
+  try {
+    const list = await operations.branches();
+    const candidates = list.branches.filter((branch) => branch.name !== inspected);
+    if (!candidates.length) {
+      terminal.write("No other local branch is available for comparison.\n");
+      return;
+    }
+    const choice = await terminal.choose("Reference branch A", [{ name: "Back", value: "back" }, ...candidates.map((branch) => ({ name: branchChoice(branch), short: safeText(branch.name), value: branch.ref }))], candidates.find((branch) => branch.current)?.ref ?? "back");
+    if (choice === "back") return;
+    let a = candidates.find((branch) => branch.ref === choice).name;
+    let b = inspected;
+    let comparison;
+    let reload = true;
+    while (!signal?.aborted) {
+      if (reload) {
+        comparison = void 0;
+        try {
+          comparison = await operations.compare(a, b);
+          terminal.write("\n" + renderComparison(comparison, style));
+        } catch (error) {
+          if (signal?.aborted) return;
+          terminal.write(style.error(safeText(error instanceof Error ? error.message : String(error))) + "\n");
+        }
+        reload = false;
+      }
+      const action = await terminal.choose("Comparison", [
+        ...comparison ? [
+          { name: "Commits only in A", value: "commits-a" },
+          { name: "Commits only in B", value: "commits-b" },
+          { name: "Files: A tip → B tip", value: "tips" },
+          { name: "Files: merge base → B tip", value: "since-base" },
+          { name: "Swap A and B", value: "swap" }
+        ] : [],
+        { name: "Refresh", value: "refresh" },
+        { name: "Back", value: "back" }
+      ]);
+      if (action === "back") return;
+      if (action === "swap" && comparison) {
+        [a, b] = [b, a];
+        comparison = {
+          ...comparison,
+          a: comparison.b,
+          b: comparison.a,
+          counts: comparison.counts.kind === "available" ? { kind: "available", value: { a: comparison.counts.value.b, b: comparison.counts.value.a } } : comparison.counts
+        };
+        terminal.write("\n" + renderComparison(comparison, style));
+        continue;
+      }
+      if (action === "refresh") {
+        reload = true;
+        continue;
+      }
+      let detail;
+      try {
+        detail = await operations.comparisonDetail(comparison, action);
+        terminal.write("\n" + renderComparisonDetail(comparison, detail, style));
+      } catch (error) {
+        if (signal?.aborted) return;
+        terminal.write(style.warning(safeText(error instanceof Error ? error.message : String(error))) + "\n");
+      }
+      let next = await terminal.choose("Navigation", [{ name: "Back to comparison", value: "back" }, { name: "Refresh comparison", value: "refresh" }, ...detail?.kind === "files" && detail.total ? [{ name: "Inspect a file…", value: "file" }] : []]);
+      if (next === "file" && detail?.kind === "files") next = await fileSession(terminal, operations, comparison, detail, signal);
+      reload = next === "refresh";
+    }
+  } catch (error) {
+    if (signal?.aborted) return;
+    throw error;
+  }
+}
+async function fileSession(terminal, operations, comparison, detail, signal) {
+  const style = terminal.style ?? plain;
+  const files = detail.allFiles;
+  let page = 0;
+  let selected;
+  while (!signal?.aborted) {
+    terminal.write(`
+Changed files ${page * 50 + 1}–${Math.min(page * 50 + 50, files.length)} of ${files.length}.
+`);
+    const choice = await terminal.choose("Changed files", [
+      { name: "Back to comparison", value: "back" },
+      { name: "Refresh comparison", value: "refresh" },
+      ...page ? [{ name: "Previous file page", value: "previous" }] : [],
+      ...(page + 1) * 50 < files.length ? [{ name: "Next file page", value: "next" }] : [],
+      ...files.slice(page * 50, page * 50 + 50).map((file) => ({ name: `${file.status} ${file.originalPath ? displayPath(file.originalPath) + " -> " : ""}${displayPath(file.path)}`, value: file.path.toString("hex") }))
+    ], selected);
+    if (choice === "back" || choice === "refresh") return choice;
+    if (choice === "next" || choice === "previous") {
+      page += choice === "next" ? 1 : -1;
+      selected = void 0;
+      continue;
+    }
+    selected = choice;
+    let patch;
+    try {
+      patch = await operations.comparisonPatch(comparison, detail.view, Buffer.from(choice, "hex"));
+    } catch (error) {
+      if (signal?.aborted || isCancellation(error)) throw error;
+      terminal.write(style.warning(safeText(error instanceof Error ? error.message : String(error))) + "\n");
+    }
+    let patchPage = 0;
+    while (!signal?.aborted) {
+      if (patch) terminal.write("\n" + renderPatch(comparison, detail.view, patch, style, patchPage));
+      const action = await terminal.choose("File navigation", [
+        { name: "Back to files", value: "back" },
+        { name: "Refresh comparison", value: "refresh" },
+        ...patchPage ? [{ name: "Previous patch page", value: "previous" }] : [],
+        ...patch && (patchPage + 1) * 80 < patch.lines.length ? [{ name: "Next patch page", value: "next" }] : []
+      ]);
+      if (action === "back") break;
+      if (action === "refresh") return action;
+      patchPage += action === "next" ? 1 : -1;
+    }
+  }
+  return "back";
+}
+
+// src/terminal/session.ts
+function isCancellation(error) {
+  return error instanceof Error && ["ExitPromptError", "AbortPromptError", "CancelPromptError"].includes(error.name);
+}
+async function branchSession(terminal, operations, signal) {
+  const style = terminal.style ?? plain;
+  let selected;
+  while (!signal?.aborted) {
+    let list;
+    try {
+      list = await operations.branches();
+      terminal.write("\n" + renderBranchContext(list, style));
+    } catch (error) {
+      if (signal?.aborted) return;
+      terminal.write("\n" + style.error(`Unable to list branches: ${safeText(error instanceof Error ? error.message : String(error))}`) + "\n");
+      if (await terminal.choose("Navigation", [{ name: "Back", value: "back" }, { name: "Refresh", value: "refresh" }]) === "back") return;
+      continue;
+    }
+    const choices = [{ name: "Back", value: "back" }, { name: "Refresh", value: "refresh" }, ...list.branches.map((branch2) => ({ name: branchChoice(branch2), short: safeText(branch2.name), value: branch2.ref }))];
+    if (!list.branches.length) terminal.write("No local branches.\n");
+    const choice = await terminal.choose("Local branches", choices, list.branches.some((b) => b.ref === selected) ? selected : list.branches[0]?.ref ?? "back");
+    if (choice === "back") return;
+    if (choice === "refresh") continue;
+    selected = choice;
+    const branch = list.branches.find((b) => b.ref === choice);
+    let action = "refresh";
+    while (action === "refresh" && !signal?.aborted) {
+      terminal.write("\n" + style.muted("Inspecting branch...") + "\n");
+      try {
+        terminal.write(renderBranchDetails(await operations.branch(branch.name), style));
+      } catch (error) {
+        if (signal?.aborted) return;
+        terminal.write(style.error(`Unable to inspect branch: ${safeText(error instanceof Error ? error.message : String(error))}`) + "\n");
+      }
+      if (signal?.aborted) return;
+      action = await terminal.choose("Navigation", [{ name: "Back", value: "back" }, { name: "Refresh", value: "refresh" }, { name: "Compare with another branch…", value: "compare" }]);
+      if (action === "compare") {
+        try {
+          await comparisonSession(terminal, operations, branch.name, signal);
+        } catch (error) {
+          if (isCancellation(error)) throw error;
+          if (signal?.aborted) return;
+          terminal.write(style.error(safeText(error instanceof Error ? error.message : String(error))) + "\n");
+        }
+        action = "refresh";
+      }
+    }
+  }
+}
+async function interactiveSession(terminal, operations, signal) {
+  const style = terminal.style ?? plain;
+  let selected = "overview";
+  while (!signal?.aborted) {
+    const action = await terminal.choose("Twiglet", [
+      { name: "Repository overview", value: "overview" },
+      { name: "Recent commits", value: "history" },
+      { name: "Local branches", value: "branches" },
+      { name: "Check Bitbucket PRs (online)", value: "prs" },
+      { name: "Exit", value: "exit" }
+    ], selected);
+    if (action === "exit") return;
+    selected = action;
+    if (action === "prs") {
+      await prSession(terminal, operations.prs, signal);
+      continue;
+    }
+    if (action === "branches") {
+      await branchSession(terminal, operations, signal);
+      continue;
+    }
+    let navigation = "refresh";
+    while (navigation === "refresh" && !signal?.aborted) {
+      terminal.write("\n" + style.muted("Inspecting repository...") + "\n");
+      try {
+        terminal.write("\n" + (action === "history" ? renderHistory(await operations.history(), style) : renderOverview(await operations.overview(), style)));
+      } catch (error) {
+        if (signal?.aborted) return;
+        terminal.write("\n" + style.error(`Unable to inspect repository: ${safeText(error instanceof Error ? error.message : String(error))}`) + "\n");
+      }
+      if (signal?.aborted) return;
+      navigation = await terminal.choose("Navigation", [{ name: "Back", value: "back" }, { name: "Refresh", value: "refresh" }]);
+    }
+  }
+}
+
+// src/terminal/pr.ts
+function renderPr(pr, style = plain) {
+  const value = (value2) => value2 === null ? style.muted("unavailable") : safeText(value2);
+  return [
+    style.heading(`PR #${pr.id}: ${safeText(pr.title)}`),
+    `State: ${safeText(pr.state)}`,
+    `URL: ${safeText(pr.url)}`,
+    `Source repository: ${value(pr.source.repository)}`,
+    `Source branch: ${style.ref(value(pr.source.branch))}`,
+    `Destination repository: ${value(pr.destination.repository)}`,
+    `Destination branch: ${style.ref(value(pr.destination.branch))}`,
+    `PR source tip reported by Bitbucket: ${style.hash(value(pr.source.tip))}`,
+    `PR destination tip reported by Bitbucket: ${style.hash(value(pr.destination.tip))}`,
+    style.muted(`Observed at: ${pr.observedAt}`)
+  ].join("\n") + "\n";
+}
+function renderPrCheck(check, style = plain, details = true) {
+  if (check.kind !== "observed") return style.warning(`${check.kind}: ${safeText(check.message)}`) + "\n";
+  const { observation } = check;
+  const lines = [
+    style.heading("Bitbucket Cloud PR observation"),
+    `Location: ${safeText(check.root)}`,
+    `Local branch: ${style.branch(safeText(check.branch))} (${style.hash(check.headOid)})`,
+    `Mapped repository: ${safeText(check.repository)}`,
+    style.muted("Scope: same-repository PRs, exact source branch, all states. Fork PR discovery is not included."),
+    style.muted("API-reported PR tips; not local tracking refs or separately verified live branch tips. No Git fetch performed."),
+    style.muted(`Last page observed at: ${observation.observedAt}. Pages are not an atomic snapshot.`),
+    ""
+  ];
+  if (!observation.complete) lines.push(style.warning(observation.message ?? "Search incomplete."));
+  if (!observation.prs.length) lines.push(observation.complete ? "No matching PR in this search scope." : "No confirmed matches in this incomplete search.");
+  else {
+    lines.push(`${observation.prs.length} matching PR${observation.prs.length === 1 ? "" : "s"}${observation.complete ? "." : " observed so far."}`);
+    if (details) for (const pr of observation.prs) lines.push("", renderPr(pr, style).trimEnd());
+  }
+  return lines.join("\n") + "\n";
+}
+async function prSession(terminal, check, signal) {
+  const style = terminal.style ?? plain;
+  while (!signal?.aborted) {
+    terminal.write("\n" + style.muted("Checking Bitbucket Cloud online...") + "\n");
+    let result;
+    try {
+      result = await check();
+    } catch (error) {
+      if (signal?.aborted || isCancellation(error)) throw error;
+      result = { kind: "local-context", message: "Unable to inspect local repository context." };
+    }
+    const prs = result.kind === "observed" ? result.observation.prs : [];
+    terminal.write(renderPrCheck(result, style, prs.length <= 1));
+    let selected = "back";
+    while (!signal?.aborted) {
+      const action = await terminal.choose("Bitbucket PRs", [
+        { name: "Back", value: "back" },
+        { name: "Check again (online)", value: "refresh" },
+        ...prs.length > 1 ? prs.map((pr) => ({ name: `#${pr.id} ${safeText(pr.state)} | ${safeText(pr.title)} | → ${safeText(pr.destination.branch ?? "unavailable")}`, value: String(pr.id) })) : []
+      ], selected);
+      if (action === "back") return;
+      if (action === "refresh") break;
+      selected = action;
+      terminal.write("\n" + renderPr(prs.find((pr) => String(pr.id) === action), style));
+      await terminal.choose("PR navigation", [{ name: "Back to results", value: "back" }]);
+    }
+  }
 }
 
 // src/git/status.ts
 function invalid() {
   throw new RepositoryError("Git returned malformed porcelain-v2 status data.");
 }
-function fields(record, count2) {
+function fields(record2, count2) {
   let start = 0;
   const meta = [];
   for (let i = 0; i < count2; i++) {
-    const end = record.indexOf(32, start);
+    const end = record2.indexOf(32, start);
     if (end < 0) invalid();
-    meta.push(record.subarray(start, end).toString("ascii"));
+    meta.push(record2.subarray(start, end).toString("ascii"));
     start = end + 1;
   }
-  const path = record.subarray(start);
-  if (!path.length) invalid();
-  return { meta, path: Buffer.from(path) };
+  const path2 = record2.subarray(start);
+  if (!path2.length) invalid();
+  return { meta, path: Buffer.from(path2) };
 }
 function parseStatus(data) {
   const records = [];
@@ -1852,27 +2494,27 @@ function parseStatus(data) {
   let upstream;
   const changes = [];
   for (let i = 0; i < records.length; i++) {
-    const record = records[i];
-    if (record[0] === 35) {
-      const header = record.toString("utf8");
+    const record2 = records[i];
+    if (record2[0] === 35) {
+      const header = record2.toString("utf8");
       if (header.startsWith("# branch.head ")) name = header.slice(14);
       if (header.startsWith("# branch.oid ")) oid = header.slice(13);
       if (header.startsWith("# branch.upstream ")) upstream = header.slice(18);
       continue;
     }
-    const kind = String.fromCharCode(record[0] ?? 0);
+    const kind = String.fromCharCode(record2[0] ?? 0);
     if (kind === "?") {
-      const { path: path2 } = fields(record, 1);
-      changes.push({ kind: "untracked", path: path2, index: "?", worktree: "?" });
+      const { path: path3 } = fields(record2, 1);
+      changes.push({ kind: "untracked", path: path3, index: "?", worktree: "?" });
       continue;
     }
     if (!["1", "2", "u"].includes(kind)) invalid();
-    const { meta, path } = fields(record, kind === "1" ? 8 : kind === "2" ? 9 : 10);
+    const { meta, path: path2 } = fields(record2, kind === "1" ? 8 : kind === "2" ? 9 : 10);
     const xy = meta[1];
     if (!/^[.MADRCUT?!]{2}$/.test(xy)) invalid();
     const change = {
       kind: kind === "u" ? "conflict" : kind === "2" ? "renamed" : "tracked",
-      path,
+      path: path2,
       index: xy[0],
       worktree: xy[1],
       submodule: meta[2]
@@ -1891,52 +2533,6 @@ function parseStatus(data) {
   else if (name === "(detached)") head = { kind: "detached", oid };
   else head = { kind: "branch", name, oid };
   return { head, changes, ...upstream ? { upstream } : {} };
-}
-
-// src/core/discovery.ts
-var import_promises = require("node:fs/promises");
-async function discover(directory, signal) {
-  let cwd;
-  try {
-    cwd = await (0, import_promises.realpath)(directory);
-  } catch {
-    throw new RepositoryError(`Repository directory does not exist or cannot be accessed: ${directory}`);
-  }
-  const bare = (await git(cwd, ["rev-parse", "--is-bare-repository"], signal)).toString().trim();
-  if (bare === "true") throw new RepositoryError("Bare repositories are not supported yet. Open a working tree.");
-  const root = (await git(cwd, ["rev-parse", "--show-toplevel"], signal)).toString("utf8").replace(/\r?\n$/, "");
-  const partial = await runGit(cwd, ["config", "--get-regexp", String.raw`^(extensions\.partialclone|remote\..*\.promisor)$`], signal);
-  if (partial.code !== 0 && partial.code !== 1) throw new RepositoryError(partial.stderr.trim() || "Cannot inspect Git configuration.");
-  if (partial.code === 0) throw new RepositoryError("Partial-clone configuration detected. Inspection is not supported yet to avoid fetching missing objects.");
-  const shallow = (await git(cwd, ["rev-parse", "--is-shallow-repository"], signal)).toString().trim() === "true";
-  return { cwd, root, shallow };
-}
-async function readHead(cwd, signal, run = runGit) {
-  const symbolic = async () => {
-    const result = await run(cwd, ["symbolic-ref", "--quiet", "HEAD"], signal);
-    if (result.code === 1) return void 0;
-    if (result.code !== 0) throw new RepositoryError(result.stderr.trim() || "Cannot resolve HEAD.");
-    const ref = result.stdout.toString("utf8").trim();
-    if (!ref.startsWith("refs/heads/")) throw new RepositoryError("HEAD does not refer to a local branch.");
-    return ref;
-  };
-  const before = await symbolic();
-  const commit = await run(cwd, ["rev-parse", "--verify", "--quiet", "HEAD^{commit}"], signal);
-  const after = await symbolic();
-  if (before !== after) throw new RepositoryError("HEAD changed during inspection. Refresh to try again.");
-  if (commit.code === 0) {
-    const oid = commit.stdout.toString("ascii").trim();
-    if (!/^[0-9a-f]+$/.test(oid)) throw new RepositoryError("Git returned an invalid HEAD object ID.");
-    return before ? { kind: "branch", name: before.slice(11), oid } : { kind: "detached", oid };
-  }
-  if (commit.code === 1 && before) {
-    const ref = await run(cwd, ["show-ref", "--verify", "--quiet", before], signal);
-    if (ref.code === 1) return { kind: "unborn", name: before.slice(11) };
-  }
-  throw new RepositoryError(commit.stderr.trim() || "HEAD commit is unavailable.");
-}
-function sameHead(a, b) {
-  return a.kind === b.kind && ("name" in a ? a.name : void 0) === ("name" in b ? b.name : void 0) && ("oid" in a ? a.oid : void 0) === ("oid" in b ? b.oid : void 0);
 }
 
 // src/core/upstream.ts
@@ -2119,12 +2715,12 @@ async function readList(cwd, root, signal) {
     refs = new Set((await git(cwd, ["for-each-ref", "--format=%(refname)"], signal)).toString("utf8").split("\n"));
     const config = await runGit(cwd, ["config", "--null", "--get-regexp", "^branch\\..*\\.(remote|merge)$"], signal);
     if (config.code !== 0 && config.code !== 1) throw new RepositoryError(config.stderr.trim() || "Cannot read tracking configuration.");
-    for (const record of config.stdout.toString("utf8").split("\0").filter(Boolean)) {
-      const separator = record.indexOf("\n");
-      const match = /^branch\.(.*)\.(remote|merge)$/.exec(record.slice(0, separator));
+    for (const record2 of config.stdout.toString("utf8").split("\0").filter(Boolean)) {
+      const separator = record2.indexOf("\n");
+      const match = /^branch\.(.*)\.(remote|merge)$/.exec(record2.slice(0, separator));
       if (!match || separator < 0) throw new RepositoryError("Malformed branch configuration.");
       const values = configured.get(match[1]) ?? { remote: [], merge: [] };
-      values[match[2]].push(record.slice(separator + 1));
+      values[match[2]].push(record2.slice(separator + 1));
       configured.set(match[1], values);
     }
   } catch (error) {
@@ -2175,48 +2771,6 @@ async function readBranchDetails(directory, name, signal, run = runGit) {
   const current = await readHead(cwd, signal);
   branch.current = current.kind !== "detached" && current.name === name;
   return { root, branch, shallow, upstream, history };
-}
-
-// src/terminal/branches.ts
-function trackingLabel(branch, style) {
-  const tracking = branch.tracking;
-  if (tracking.kind === "none") return style.muted("no upstream");
-  if (tracking.kind === "unavailable") return style.warning(`tracking unavailable: ${safeText(tracking.message)}`);
-  return `${style.ref(safeText(tracking.target.ref))}${tracking.target.source === "local-branch" ? " (local branch)" : ""}${tracking.available ? "" : style.warning(" (missing locally)")}`;
-}
-function branchChoice(branch, style = plain) {
-  const subject = safeText(branch.tip?.subject ?? "No commits yet");
-  return `${branch.current ? style.good("* ") : ""}${(branch.current ? style.branch : style.ref)(safeText(branch.name))} | ${style.muted(safeText(branch.tip?.committedAt.slice(0, 10) ?? "unborn"))} | ${style.subject(subject.length > 50 ? subject.slice(0, 47) + "..." : subject)} | ${trackingLabel(branch, style)}`;
-}
-function renderBranchContext(list, style = plain) {
-  return `${style.heading("Local branches")}
-Location: ${safeText(list.root)}
-${list.head.kind === "detached" ? style.warning("HEAD is detached.") : `Current branch: ${style.branch(safeText(list.head.name))}`}
-* Current in this worktree. Dates are tip commit dates, not branch usage dates.
-Remote-tracking information is local; remote freshness unknown. No fetch performed.
-`;
-}
-function renderBranches(list, style = plain) {
-  return renderBranchContext(list, style) + "\n" + (list.branches.length ? list.branches.map((branch) => branchChoice(branch, style)).join("\n") : "No local branches.") + "\n";
-}
-function renderBranchDetails(details, style = plain) {
-  const { branch, history } = details;
-  const lines = [
-    style.heading("Branch details"),
-    `Location: ${safeText(details.root)}`,
-    `Branch: ${(branch.current ? style.branch : style.ref)(safeText(branch.name))}${branch.current ? " (current in this worktree)" : ""}`,
-    style.muted("Inspection only; no branch is checked out and no working-tree status is shown.")
-  ];
-  if (branch.tip) lines.push(`Tip: ${style.hash(branch.tip.oid)}`, `Subject: ${style.subject(safeText(branch.tip.subject))}`, `Author: ${style.author(safeText(branch.tip.author))}`, `Tip commit date: ${style.muted(safeText(branch.tip.committedAt))}`);
-  else lines.push("No commits yet.");
-  lines.push(...renderUpstream(details.upstream, style), "", style.heading("Recent commits reachable from this branch, including merges:"));
-  if (history.kind === "unavailable") lines.push(style.warning(`History unavailable: ${safeText(history.message)}`));
-  else {
-    for (const commit of history.commits) lines.push(...renderCommit(commit, style));
-    if (history.hasMore) lines.push("Showing the latest 20 reachable commits; more are available.");
-  }
-  if (details.shallow) lines.push(style.warning("Shallow repository: history is incomplete."));
-  return lines.join("\n") + "\n";
 }
 
 // node_modules/@inquirer/core/dist/esm/lib/key.js
@@ -2706,11 +3260,11 @@ var defaultTheme = {
   style: {
     answer: import_yoctocolors_cjs.default.cyan,
     message: import_yoctocolors_cjs.default.bold,
-    error: (text) => import_yoctocolors_cjs.default.red(`> ${text}`),
-    defaultAnswer: (text) => import_yoctocolors_cjs.default.dim(`(${text})`),
+    error: (text2) => import_yoctocolors_cjs.default.red(`> ${text2}`),
+    defaultAnswer: (text2) => import_yoctocolors_cjs.default.dim(`(${text2})`),
     help: import_yoctocolors_cjs.default.dim,
     highlight: import_yoctocolors_cjs.default.cyan,
-    key: (text) => import_yoctocolors_cjs.default.cyan(import_yoctocolors_cjs.default.bold(`<${text}>`))
+    key: (text2) => import_yoctocolors_cjs.default.cyan(import_yoctocolors_cjs.default.bold(`<${text2}>`))
   }
 };
 
@@ -3366,8 +3920,8 @@ var import_yoctocolors_cjs3 = __toESM(require_yoctocolors_cjs(), 1);
 var selectTheme = {
   icon: { cursor: esm_default.pointer },
   style: {
-    disabled: (text) => import_yoctocolors_cjs3.default.dim(`- ${text}`),
-    description: (text) => import_yoctocolors_cjs3.default.cyan(text),
+    disabled: (text2) => import_yoctocolors_cjs3.default.dim(`- ${text2}`),
+    description: (text2) => import_yoctocolors_cjs3.default.cyan(text2),
     keysHelpTip: (keys) => keys.map(([key, action]) => `${import_yoctocolors_cjs3.default.bold(key)} ${import_yoctocolors_cjs3.default.dim(action)}`).join(import_yoctocolors_cjs3.default.dim(" • "))
   },
   helpMode: "always",
@@ -3530,8 +4084,8 @@ function createTerminal(signal) {
   const style = outputStyle(process.stdout);
   return {
     style,
-    write: (text) => {
-      process.stdout.write(text);
+    write: (text2) => {
+      process.stdout.write(text2);
     },
     choose: (message2, choices, defaultValue) => esm_default2({
       message: message2,
@@ -3553,261 +4107,6 @@ function createTerminal(signal) {
   };
 }
 
-// src/terminal/comparison.ts
-function endpoints(comparison, style) {
-  return [
-    `${style.selection("A")} (reference): ${style.ref(safeText(comparison.a.ref))} ${style.hash(comparison.a.oid)}`,
-    `${style.selection("B")} (inspected): ${style.ref(safeText(comparison.b.ref))} ${style.hash(comparison.b.oid)}`
-  ];
-}
-function count(value, style) {
-  return value === 0 ? style.muted(String(value)) : style.selection(String(value));
-}
-function renderComparison(comparison, style = plain) {
-  const lines = [style.heading("Branch comparison"), `Location: ${safeText(comparison.root)}`, ...endpoints(comparison, style), ""];
-  if (comparison.counts.kind === "available") lines.push(`Only in A: ${count(comparison.counts.value.a, style)} commits`, `Only in B: ${count(comparison.counts.value.b, style)} commits`);
-  else lines.push(style.warning(comparison.counts.message));
-  if (comparison.bases.kind === "unavailable") lines.push(style.warning(comparison.bases.message));
-  else if (!comparison.bases.value.length) lines.push(`Merge base: ${style.warning("none (unrelated histories).")}`);
-  else if (comparison.bases.value.length === 1) lines.push(`Merge base: ${style.hash(comparison.bases.value[0])}`);
-  else lines.push(style.warning("Multiple merge bases; no single base selected:"), ...comparison.bases.value.map((id) => `  ${style.hash(id)}`));
-  lines.push(
-    "",
-    style.muted("Unique commits describe reachability, not patch equivalence. File views compare committed snapshots."),
-    style.muted("No checkout, working-tree comparison, fetch, or prediction of a merge result.")
-  );
-  return lines.join("\n") + "\n";
-}
-function renderComparisonDetail(comparison, detail, style = plain) {
-  const title = detail.kind === "commits" ? `Commits only in ${detail.side.toUpperCase()}` : detail.view === "tips" ? "Files: A tip → B tip" : "Files: merge base → B tip";
-  const lines = [style.heading(title), ...endpoints(comparison, style)];
-  if (detail.kind === "commits") {
-    lines.push(style.muted("Reachable only from this side, including merges; patch-equivalent commits are not excluded."), "", `Total: ${count(detail.total, style)} commits`, "");
-    for (const commit of detail.commits) lines.push(...renderCommit(commit, style));
-    if (!detail.total) lines.push("No unique commits on this side.");
-    if (detail.total > detail.commits.length) lines.push("", style.muted(`Showing ${detail.commits.length} of ${detail.total} commits.`));
-  } else {
-    lines.push(
-      `Before: ${style.hash(detail.before)}`,
-      `After: ${style.hash(detail.after)}`,
-      style.muted(detail.view === "tips" ? "Changes to transform the A snapshot into the B snapshot." : "Net changes from the common ancestor snapshot to B; not a predicted merge result."),
-      "",
-      `Changed paths: ${count(detail.total, style)}`,
-      ""
-    );
-    for (const file of detail.files) {
-      const from = file.originalPath ? `${displayPath(file.originalPath)} -> ` : "";
-      const statusStyle = file.status === "A" ? style.good : file.status === "R" ? style.ref : style.warning;
-      lines.push(`  ${style.heading(statusStyle(file.status))} ${from}${displayPath(file.path)}${file.similarity !== void 0 ? style.muted(` (${file.similarity}% similarity)`) : ""}${file.submodule ? style.muted(" [submodule pointer]") : ""}`);
-    }
-    if (!detail.total) lines.push("No committed file differences between these endpoints.");
-    if (detail.total > detail.files.length) lines.push("", style.muted(`Showing ${detail.files.length} of ${detail.total} changed paths.`));
-    lines.push(
-      "",
-      style.muted("A added · M modified · D deleted · R renamed · T type changed."),
-      style.muted("Renames: Git similarity ≥50%, exhaustive search limited to 1000 candidates.")
-    );
-  }
-  return lines.join("\n") + "\n";
-}
-async function comparisonSession(terminal, operations, inspected, signal) {
-  const style = terminal.style ?? plain;
-  try {
-    const list = await operations.branches();
-    const candidates = list.branches.filter((branch) => branch.name !== inspected);
-    if (!candidates.length) {
-      terminal.write("No other local branch is available for comparison.\n");
-      return;
-    }
-    const choice = await terminal.choose("Reference branch A", [{ name: "Back", value: "back" }, ...candidates.map((branch) => ({ name: branchChoice(branch), short: safeText(branch.name), value: branch.ref }))], candidates.find((branch) => branch.current)?.ref ?? "back");
-    if (choice === "back") return;
-    let a = candidates.find((branch) => branch.ref === choice).name;
-    let b = inspected;
-    let comparison;
-    let reload = true;
-    while (!signal?.aborted) {
-      if (reload) {
-        comparison = void 0;
-        try {
-          comparison = await operations.compare(a, b);
-          terminal.write("\n" + renderComparison(comparison, style));
-        } catch (error) {
-          if (signal?.aborted) return;
-          terminal.write(style.error(safeText(error instanceof Error ? error.message : String(error))) + "\n");
-        }
-        reload = false;
-      }
-      const action = await terminal.choose("Comparison", [
-        ...comparison ? [
-          { name: "Commits only in A", value: "commits-a" },
-          { name: "Commits only in B", value: "commits-b" },
-          { name: "Files: A tip → B tip", value: "tips" },
-          { name: "Files: merge base → B tip", value: "since-base" },
-          { name: "Swap A and B", value: "swap" }
-        ] : [],
-        { name: "Refresh", value: "refresh" },
-        { name: "Back", value: "back" }
-      ]);
-      if (action === "back") return;
-      if (action === "swap" && comparison) {
-        [a, b] = [b, a];
-        comparison = {
-          ...comparison,
-          a: comparison.b,
-          b: comparison.a,
-          counts: comparison.counts.kind === "available" ? { kind: "available", value: { a: comparison.counts.value.b, b: comparison.counts.value.a } } : comparison.counts
-        };
-        terminal.write("\n" + renderComparison(comparison, style));
-        continue;
-      }
-      if (action === "refresh") {
-        reload = true;
-        continue;
-      }
-      let detail;
-      try {
-        detail = await operations.comparisonDetail(comparison, action);
-        terminal.write("\n" + renderComparisonDetail(comparison, detail, style));
-      } catch (error) {
-        if (signal?.aborted) return;
-        terminal.write(style.warning(safeText(error instanceof Error ? error.message : String(error))) + "\n");
-      }
-      let next = await terminal.choose("Navigation", [{ name: "Back to comparison", value: "back" }, { name: "Refresh comparison", value: "refresh" }, ...detail?.kind === "files" && detail.total ? [{ name: "Inspect a file…", value: "file" }] : []]);
-      if (next === "file" && detail?.kind === "files") next = await fileSession(terminal, operations, comparison, detail, signal);
-      reload = next === "refresh";
-    }
-  } catch (error) {
-    if (signal?.aborted) return;
-    throw error;
-  }
-}
-async function fileSession(terminal, operations, comparison, detail, signal) {
-  const style = terminal.style ?? plain;
-  const files = detail.allFiles;
-  let page = 0;
-  let selected;
-  while (!signal?.aborted) {
-    terminal.write(`
-Changed files ${page * 50 + 1}–${Math.min(page * 50 + 50, files.length)} of ${files.length}.
-`);
-    const choice = await terminal.choose("Changed files", [
-      { name: "Back to comparison", value: "back" },
-      { name: "Refresh comparison", value: "refresh" },
-      ...page ? [{ name: "Previous file page", value: "previous" }] : [],
-      ...(page + 1) * 50 < files.length ? [{ name: "Next file page", value: "next" }] : [],
-      ...files.slice(page * 50, page * 50 + 50).map((file) => ({ name: `${file.status} ${file.originalPath ? displayPath(file.originalPath) + " -> " : ""}${displayPath(file.path)}`, value: file.path.toString("hex") }))
-    ], selected);
-    if (choice === "back" || choice === "refresh") return choice;
-    if (choice === "next" || choice === "previous") {
-      page += choice === "next" ? 1 : -1;
-      selected = void 0;
-      continue;
-    }
-    selected = choice;
-    let patch;
-    try {
-      patch = await operations.comparisonPatch(comparison, detail.view, Buffer.from(choice, "hex"));
-    } catch (error) {
-      if (signal?.aborted || isCancellation(error)) throw error;
-      terminal.write(style.warning(safeText(error instanceof Error ? error.message : String(error))) + "\n");
-    }
-    let patchPage = 0;
-    while (!signal?.aborted) {
-      if (patch) terminal.write("\n" + renderPatch(comparison, detail.view, patch, style, patchPage));
-      const action = await terminal.choose("File navigation", [
-        { name: "Back to files", value: "back" },
-        { name: "Refresh comparison", value: "refresh" },
-        ...patchPage ? [{ name: "Previous patch page", value: "previous" }] : [],
-        ...patch && (patchPage + 1) * 80 < patch.lines.length ? [{ name: "Next patch page", value: "next" }] : []
-      ]);
-      if (action === "back") break;
-      if (action === "refresh") return action;
-      patchPage += action === "next" ? 1 : -1;
-    }
-  }
-  return "back";
-}
-
-// src/terminal/session.ts
-function isCancellation(error) {
-  return error instanceof Error && ["ExitPromptError", "AbortPromptError", "CancelPromptError"].includes(error.name);
-}
-async function branchSession(terminal, operations, signal) {
-  const style = terminal.style ?? plain;
-  let selected;
-  while (!signal?.aborted) {
-    let list;
-    try {
-      list = await operations.branches();
-      terminal.write("\n" + renderBranchContext(list, style));
-    } catch (error) {
-      if (signal?.aborted) return;
-      terminal.write("\n" + style.error(`Unable to list branches: ${safeText(error instanceof Error ? error.message : String(error))}`) + "\n");
-      if (await terminal.choose("Navigation", [{ name: "Back", value: "back" }, { name: "Refresh", value: "refresh" }]) === "back") return;
-      continue;
-    }
-    const choices = [{ name: "Back", value: "back" }, { name: "Refresh", value: "refresh" }, ...list.branches.map((branch2) => ({ name: branchChoice(branch2), short: safeText(branch2.name), value: branch2.ref }))];
-    if (!list.branches.length) terminal.write("No local branches.\n");
-    const choice = await terminal.choose("Local branches", choices, list.branches.some((b) => b.ref === selected) ? selected : list.branches[0]?.ref ?? "back");
-    if (choice === "back") return;
-    if (choice === "refresh") continue;
-    selected = choice;
-    const branch = list.branches.find((b) => b.ref === choice);
-    let action = "refresh";
-    while (action === "refresh" && !signal?.aborted) {
-      terminal.write("\n" + style.muted("Inspecting branch...") + "\n");
-      try {
-        terminal.write(renderBranchDetails(await operations.branch(branch.name), style));
-      } catch (error) {
-        if (signal?.aborted) return;
-        terminal.write(style.error(`Unable to inspect branch: ${safeText(error instanceof Error ? error.message : String(error))}`) + "\n");
-      }
-      if (signal?.aborted) return;
-      action = await terminal.choose("Navigation", [{ name: "Back", value: "back" }, { name: "Refresh", value: "refresh" }, { name: "Compare with another branch…", value: "compare" }]);
-      if (action === "compare") {
-        try {
-          await comparisonSession(terminal, operations, branch.name, signal);
-        } catch (error) {
-          if (isCancellation(error)) throw error;
-          if (signal?.aborted) return;
-          terminal.write(style.error(safeText(error instanceof Error ? error.message : String(error))) + "\n");
-        }
-        action = "refresh";
-      }
-    }
-  }
-}
-async function interactiveSession(terminal, operations, signal) {
-  const style = terminal.style ?? plain;
-  let selected = "overview";
-  while (!signal?.aborted) {
-    const action = await terminal.choose("Twiglet", [
-      { name: "Repository overview", value: "overview" },
-      { name: "Recent commits", value: "history" },
-      { name: "Local branches", value: "branches" },
-      { name: "Exit", value: "exit" }
-    ], selected);
-    if (action === "exit") return;
-    selected = action;
-    if (action === "branches") {
-      await branchSession(terminal, operations, signal);
-      continue;
-    }
-    let navigation = "refresh";
-    while (navigation === "refresh" && !signal?.aborted) {
-      terminal.write("\n" + style.muted("Inspecting repository...") + "\n");
-      try {
-        terminal.write("\n" + (action === "history" ? renderHistory(await operations.history(), style) : renderOverview(await operations.overview(), style)));
-      } catch (error) {
-        if (signal?.aborted) return;
-        terminal.write("\n" + style.error(`Unable to inspect repository: ${safeText(error instanceof Error ? error.message : String(error))}`) + "\n");
-      }
-      if (signal?.aborted) return;
-      navigation = await terminal.choose("Navigation", [{ name: "Back", value: "back" }, { name: "Refresh", value: "refresh" }]);
-    }
-  }
-}
-
 // src/git/diff.ts
 function parseDiff(data) {
   const fields2 = [];
@@ -3820,15 +4119,15 @@ function parseDiff(data) {
   const result = [];
   for (let i = 0; i < fields2.length; ) {
     const match = /^:(\d{6}) (\d{6}) ([0-9a-f]+) ([0-9a-f]+) ([AMDRT])(\d*)$/.exec(fields2[i++].toString("ascii"));
-    const path = fields2[i++];
-    if (!match || !path?.length) throw new RepositoryError("Malformed Git file comparison.");
+    const path2 = fields2[i++];
+    if (!match || !path2?.length) throw new RepositoryError("Malformed Git file comparison.");
     const status = match[5];
-    const entry = { status, path, submodule: match[1] === "160000" || match[2] === "160000", beforeMode: match[1], afterMode: match[2], beforeOid: match[3], afterOid: match[4] };
+    const entry = { status, path: path2, submodule: match[1] === "160000" || match[2] === "160000", beforeMode: match[1], afterMode: match[2], beforeOid: match[3], afterOid: match[4] };
     if (status === "R") {
       const destination = fields2[i++];
       const similarity = Number(match[6]);
       if (!destination?.length || !match[6] || similarity > 100) throw new RepositoryError("Malformed Git rename.");
-      entry.originalPath = path;
+      entry.originalPath = path2;
       entry.path = destination;
       entry.similarity = similarity;
     }
@@ -3859,9 +4158,9 @@ async function readSnapshotPatch(root, before, after, file, signal, run = runGit
   const result = await run(root, args, signal);
   if (result.code !== 0) throw new RepositoryError(result.stderr.trim() || "Cannot read file patch.");
   if (result.stdout.length > 1024 * 1024) throw new RepositoryError("Patch unavailable: exceeds the 1 MiB display budget. No partial patch is shown.");
-  const text = result.stdout.toString("utf8");
-  if (!Buffer.from(text).equals(result.stdout)) throw new RepositoryError("Patch unavailable: content is not valid UTF-8.");
-  const lines = text.split("\n");
+  const text2 = result.stdout.toString("utf8");
+  if (!Buffer.from(text2).equals(result.stdout)) throw new RepositoryError("Patch unavailable: content is not valid UTF-8.");
+  const lines = text2.split("\n");
   if (lines.at(-1) === "") lines.pop();
   if (lines.some((line) => line.startsWith("Binary files "))) return { ...base, kind: "binary", lines: [] };
   const start = lines.findIndex((line) => line.startsWith("@@ "));
@@ -3918,10 +4217,10 @@ async function readComparisonDetail(comparison, view, signal, run = runGit) {
   let detail;
   if (view === "commits-a" || view === "commits-b") {
     if (comparison.counts.kind === "unavailable") throw new RepositoryError(comparison.counts.message);
-    const side = view === "commits-a" ? "a" : "b";
-    const other = side === "a" ? "b" : "a";
-    const commits = parseHistory(await query(cwd, ["log", "-z", "--date-order", "--max-count=20", "--no-patch", "--no-decorate", "--no-notes", "--no-show-signature", "--no-use-mailmap", "--encoding=UTF-8", "--format=%H%x00%P%x00%an%x00%cI%x00%s", comparison[side].oid, `^${comparison[other].oid}`, "--"], signal, run));
-    detail = { kind: "commits", side, commits, total: comparison.counts.value[side] };
+    const side2 = view === "commits-a" ? "a" : "b";
+    const other = side2 === "a" ? "b" : "a";
+    const commits = parseHistory(await query(cwd, ["log", "-z", "--date-order", "--max-count=20", "--no-patch", "--no-decorate", "--no-notes", "--no-show-signature", "--no-use-mailmap", "--encoding=UTF-8", "--format=%H%x00%P%x00%an%x00%cI%x00%s", comparison[side2].oid, `^${comparison[other].oid}`, "--"], signal, run));
+    detail = { kind: "commits", side: side2, commits, total: comparison.counts.value[side2] };
   } else {
     let before = comparison.a.oid;
     if (view === "since-base") {
@@ -3935,10 +4234,10 @@ async function readComparisonDetail(comparison, view, signal, run = runGit) {
   await verify(cwd, comparison, signal, run);
   return detail;
 }
-async function readComparisonPatch(comparison, view, path, signal, run = runGit) {
+async function readComparisonPatch(comparison, view, path2, signal, run = runGit) {
   const detail = await readComparisonDetail(comparison, view, signal, run);
   if (detail.kind !== "files") throw new RepositoryError("File comparison required.");
-  const file = detail.allFiles.find((file2) => file2.path.equals(path));
+  const file = detail.allFiles.find((file2) => file2.path.equals(path2));
   if (!file) throw new RepositoryError("No changed file with that exact repository-relative path.");
   const patch = await readSnapshotPatch(comparison.root, detail.before, detail.after, file, signal, run);
   await verify(comparison.root, comparison, signal, run);
@@ -3946,7 +4245,7 @@ async function readComparisonPatch(comparison, view, path, signal, run = runGit)
 }
 
 // src/cli.ts
-var help = `Twiglet 0.5.0 - a small Git repository companion
+var help = `Twiglet 0.6.0 - a small Git repository companion
 
 Usage: tl [--repo <directory>] [status]
        tl [--repo <directory>] log [--limit N]
@@ -3954,6 +4253,7 @@ Usage: tl [--repo <directory>] [status]
        tl [--repo <directory>] branch <name>
        tl [--repo <directory>] compare <A> <B> [--view commits-a|commits-b|tips|since-base]
        tl [--repo <directory>] compare <A> <B> --view tips|since-base --file <path>
+       tl [--repo <directory>] pr --online
        tl --help
        tl --version
 
@@ -3965,6 +4265,8 @@ branches lists local branches. branch inspects one exact local name without chec
 compare prints a summary. A is the reference, B the inspected local branch.
 tips compares A tip to B tip; since-base compares their single merge base to B.
 Unavailable upstream comparison does not fail an otherwise useful overview.
+pr --online checks same-repository Bitbucket Cloud PRs using user-local configuration.
+Other inspection commands remain offline.
 Requires Node 22+ and installed Git. No fetch or repository changes.
 `;
 async function main() {
@@ -3978,13 +4280,14 @@ async function main() {
   let limit;
   let information;
   let repoSet = false;
+  let online = false;
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
     if (arg === "--repo" && !repoSet) {
       if (!args[i + 1] || args[i + 1].startsWith("--")) throw new Error("--repo requires a directory.");
       directory = args[++i];
       repoSet = true;
-    } else if ((arg === "status" || arg === "log" || arg === "branches" || arg === "branch" || arg === "compare") && !command) {
+    } else if ((arg === "status" || arg === "log" || arg === "branches" || arg === "branch" || arg === "compare" || arg === "pr") && !command) {
       command = arg;
       if (arg === "branch") {
         branchName = args[++i];
@@ -3996,7 +4299,8 @@ async function main() {
         if (!a || !b) throw new Error("compare requires two local branch names: A B.");
         comparisonNames = [a, b];
       }
-    } else if (arg === "--view" && view === void 0) {
+    } else if (arg === "--online" && !online) online = true;
+    else if (arg === "--view" && view === void 0) {
       const value = args[++i];
       if (!value || !["commits-a", "commits-b", "tips", "since-base"].includes(value)) throw new Error("--view requires commits-a, commits-b, tips, or since-base.");
       view = value;
@@ -4012,12 +4316,14 @@ async function main() {
     else throw new Error(`Unknown argument: ${arg}. Use --help for usage.`);
   }
   if (information) {
-    process.stdout.write(information === "help" ? help : "0.5.0\n");
+    process.stdout.write(information === "help" ? help : "0.6.0\n");
     return;
   }
   if (limit !== void 0 && command !== "log") throw new Error("--limit is only supported with log.");
   if (view !== void 0 && command !== "compare") throw new Error("--view is only supported with compare.");
   if (file !== void 0 && (command !== "compare" || view !== "tips" && view !== "since-base")) throw new Error("--file requires compare with --view tips or since-base.");
+  if (command === "pr" && !online) throw new Error("pr requires --online to explicitly request a Bitbucket Cloud check.");
+  if (online && command !== "pr") throw new Error("--online is only supported with pr.");
   const abort = new AbortController();
   const interrupt = () => abort.abort();
   process.on("SIGINT", interrupt);
@@ -4026,15 +4332,20 @@ async function main() {
   const style = outputStyle(process.stdout);
   try {
     const operations = {
+      prs: () => checkPullRequests(directory, abort.signal),
       overview: () => readOverview(directory, abort.signal),
       history: () => readRecentCommits(directory, limit ?? 20, abort.signal),
       branches: () => listLocalBranches(directory, abort.signal),
       branch: (name) => readBranchDetails(directory, name, abort.signal),
       compare: (a, b) => readComparison(directory, a, b, abort.signal),
-      comparisonPatch: (comparison, view2, path) => readComparisonPatch(comparison, view2, path, abort.signal),
+      comparisonPatch: (comparison, view2, path2) => readComparisonPatch(comparison, view2, path2, abort.signal),
       comparisonDetail: (comparison, view2) => readComparisonDetail(comparison, view2, abort.signal)
     };
-    if (command === "compare") {
+    if (command === "pr") {
+      const result = await operations.prs();
+      process.stdout.write(renderPrCheck(result, style));
+      if (!prCheckSucceeded(result)) process.exitCode = 1;
+    } else if (command === "compare") {
       const comparison = await operations.compare(...comparisonNames);
       process.stdout.write(file !== void 0 ? renderPatch(comparison, view, await operations.comparisonPatch(comparison, view, Buffer.from(file)), style) : view ? renderComparisonDetail(comparison, await operations.comparisonDetail(comparison, view), style) : renderComparison(comparison, style));
     } else if (command === "branches") {

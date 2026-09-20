@@ -1,3 +1,5 @@
+import { checkPullRequests, prCheckSucceeded } from './core/pr.js';
+import { renderPrCheck } from './terminal/pr.js';
 import { renderPatch } from './terminal/patch.js';
 import { readOverview } from './core/repository.js';
 import { readRecentCommits } from './core/history.js';
@@ -11,7 +13,7 @@ import { readComparison, readComparisonDetail, readComparisonPatch } from './cor
 import type { Comparison, ComparisonView } from './core/comparison.js';
 import { renderComparison, renderComparisonDetail } from './terminal/comparison.js';
 
-const help = `Twiglet 0.5.0 - a small Git repository companion
+const help = `Twiglet 0.6.0 - a small Git repository companion
 
 Usage: tl [--repo <directory>] [status]
        tl [--repo <directory>] log [--limit N]
@@ -19,6 +21,7 @@ Usage: tl [--repo <directory>] [status]
        tl [--repo <directory>] branch <name>
        tl [--repo <directory>] compare <A> <B> [--view commits-a|commits-b|tips|since-base]
        tl [--repo <directory>] compare <A> <B> --view tips|since-base --file <path>
+       tl [--repo <directory>] pr --online
        tl --help
        tl --version
 
@@ -30,13 +33,15 @@ branches lists local branches. branch inspects one exact local name without chec
 compare prints a summary. A is the reference, B the inspected local branch.
 tips compares A tip to B tip; since-base compares their single merge base to B.
 Unavailable upstream comparison does not fail an otherwise useful overview.
+pr --online checks same-repository Bitbucket Cloud PRs using user-local configuration.
+Other inspection commands remain offline.
 Requires Node 22+ and installed Git. No fetch or repository changes.
 `;
 
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
   let directory = process.cwd();
-  let command: 'status' | 'log' | 'branches' | 'branch' | 'compare' | undefined;
+  let command: 'status' | 'log' | 'branches' | 'branch' | 'compare' | 'pr' | undefined;
   let comparisonNames: [string, string] | undefined;
   let view: ComparisonView | undefined;
   let file: string | undefined;
@@ -44,13 +49,14 @@ async function main(): Promise<void> {
   let limit: number | undefined;
   let information: 'help' | 'version' | undefined;
   let repoSet = false;
+  let online = false;
   for (let i = 0; i < args.length; i++) {
     const arg = args[i]!;
     if (arg === '--repo' && !repoSet) {
       if (!args[i + 1] || args[i + 1]!.startsWith('--')) throw new Error('--repo requires a directory.');
       directory = args[++i]!;
       repoSet = true;
-    } else if ((arg === 'status' || arg === 'log' || arg === 'branches' || arg === 'branch' || arg === 'compare') && !command) {
+    } else if ((arg === 'status' || arg === 'log' || arg === 'branches' || arg === 'branch' || arg === 'compare' || arg === 'pr') && !command) {
       command = arg;
       if (arg === 'branch') {
         branchName = args[++i];
@@ -63,6 +69,7 @@ async function main(): Promise<void> {
         comparisonNames = [a, b];
       }
     }
+    else if (arg === '--online' && !online) online = true;
     else if (arg === '--view' && view === undefined) {
       const value = args[++i];
       if (!value || !['commits-a', 'commits-b', 'tips', 'since-base'].includes(value)) throw new Error('--view requires commits-a, commits-b, tips, or since-base.');
@@ -81,10 +88,12 @@ async function main(): Promise<void> {
     else if (arg === '--version') information = 'version';
     else throw new Error(`Unknown argument: ${arg}. Use --help for usage.`);
   }
-  if (information) { process.stdout.write(information === 'help' ? help : '0.5.0\n'); return; }
+  if (information) { process.stdout.write(information === 'help' ? help : '0.6.0\n'); return; }
   if (limit !== undefined && command !== 'log') throw new Error('--limit is only supported with log.');
   if (view !== undefined && command !== 'compare') throw new Error('--view is only supported with compare.');
   if (file !== undefined && (command !== 'compare' || (view !== 'tips' && view !== 'since-base'))) throw new Error('--file requires compare with --view tips or since-base.');
+  if (command === 'pr' && !online) throw new Error('pr requires --online to explicitly request a Bitbucket Cloud check.');
+  if (online && command !== 'pr') throw new Error('--online is only supported with pr.');
   const abort = new AbortController();
   const interrupt = () => abort.abort();
   process.on('SIGINT', interrupt);
@@ -93,6 +102,7 @@ async function main(): Promise<void> {
   const style = outputStyle(process.stdout);
   try {
     const operations = {
+      prs: () => checkPullRequests(directory, abort.signal),
       overview: () => readOverview(directory, abort.signal),
       history: () => readRecentCommits(directory, limit ?? 20, abort.signal),
       branches: () => listLocalBranches(directory, abort.signal),
@@ -101,7 +111,11 @@ async function main(): Promise<void> {
       comparisonPatch: (comparison: Comparison, view: 'tips' | 'since-base', path: Buffer) => readComparisonPatch(comparison, view, path, abort.signal),
       comparisonDetail: (comparison: Comparison, view: ComparisonView) => readComparisonDetail(comparison, view, abort.signal),
     };
-    if (command === 'compare') {
+    if (command === 'pr') {
+      const result = await operations.prs();
+      process.stdout.write(renderPrCheck(result, style));
+      if (!prCheckSucceeded(result)) process.exitCode = 1;
+    } else if (command === 'compare') {
       const comparison = await operations.compare(...comparisonNames!);
       process.stdout.write(file !== undefined ? renderPatch(comparison, view as 'tips' | 'since-base', await operations.comparisonPatch(comparison, view as 'tips' | 'since-base', Buffer.from(file)), style) : view ? renderComparisonDetail(comparison, await operations.comparisonDetail(comparison, view), style) : renderComparison(comparison, style));
     } else if (command === 'branches') {

@@ -7,7 +7,8 @@ quick to understand.
 This is an early-stage personal project intended to be open source. `tl` opens an
 interactive menu for repository overview, recent commits, and local branch
 exploration and comparison, with locally known upstream divergence. Views offer
-Refresh and Back.
+Refresh and Back. An optional, explicitly online Bitbucket Cloud action checks PRs
+using user-local configuration; local Git inspection remains independently useful.
 
 ## Technical direction
 
@@ -159,6 +160,78 @@ session usable. No external helpers, network, checkout, index scan, or repositor
 writes are involved. Commit-detail navigation and patch application remain deferred.
 
 
+## Bitbucket Cloud PR check (Milestone 6)
+
+`tl pr --online` explicitly checks Bitbucket Cloud for pull requests associated with
+the current committed local branch. In the main menu, choose **Check Bitbucket PRs
+(online)**. Results offer **Check again (online)** and Back; multiple matches have a
+selector. Browsing returned results makes no additional requests. `tl status` and
+all existing Git views remain offline, and do not read provider configuration.
+
+Create a user-local JSON file outside repositories:
+
+- Windows: `%APPDATA%/Twiglet/config.json` (fallback: the user's AppData/Roaming).
+- macOS/Linux: `$XDG_CONFIG_HOME/twiglet/config.json`, or `~/.config/twiglet/config.json`.
+- `TWIGLET_CONFIG` can explicitly override the file location.
+
+```json
+{
+  "version": 1,
+  "bitbucketCloud": {
+    "emailEnv": "TWIGLET_BITBUCKET_EMAIL",
+    "tokenEnv": "TWIGLET_BITBUCKET_TOKEN"
+  },
+  "repositories": [
+    {
+      "path": "C:/work/example",
+      "bitbucketCloud": {
+        "workspace": "example-workspace",
+        "repository": "example-repository"
+      }
+    }
+  ]
+}
+```
+
+Use an absolute worktree-root path and Bitbucket Cloud workspace/repository slugs.
+Paths are matched by canonical directory spelling, including nested invocation and
+aliases. Each linked worktree needs its own explicit mapping. Remote URLs are not
+used to guess mappings. Duplicate mappings and unknown config fields are errors.
+The file is limited to 256 KiB. No config file is automatically created or modified.
+
+Set the referenced email and token environment variables in your local development
+environment. Use the Atlassian account email and a user-scoped Bitbucket API token
+with `read:pullrequest:bitbucket`; the user must have access to the mapped repository.
+This uses Basic authentication over HTTPS to `api.bitbucket.org`.
+See [Bitbucket Cloud authentication](https://developer.atlassian.com/cloud/bitbucket/rest/intro/).
+Do not put credential values in JSON, repository files, or command arguments.
+Twiglet does not provide credential storage or log raw API errors/authorization.
+
+Search scope is **same-repository PRs, exact source branch name, all PR states**.
+Source repository identity is checked as well as branch name; fork/cross-repository
+PR discovery is not included. Branch names are not inferred from upstream mappings.
+A matching PR does not establish that local HEAD equals its source tip. Detached or
+unborn HEAD cannot be associated and makes no API request. HEAD changes during the
+check invalidate the association. No branch, ref, configuration or index is changed.
+
+Each PR shows identity, title, native state, URL, source/destination repository and
+branch, full API-reported source/destination tip IDs, and page observation time.
+Those tips are PR data, not local remote-tracking refs or independently checked live
+branch tips. Observation time is when Twiglet received data, not a fetch timestamp.
+Pages are separate observations, not an atomic remote snapshot. Missing fields are
+labelled unavailable; unresolvable source identities make the search incomplete.
+
+Checks are GET-only, cancellable, bounded to 30 seconds, 10 pages of 50 results, and
+1 MiB per page. Redirects and pagination outside the expected API origin/endpoint
+are rejected. There are no automatic retries, persistent cache, background checks,
+Git fetch/pull operations, divergence calculations, PR checks, or issue integrations.
+
+A completed search exits 0, including zero or multiple matches. Not configured,
+invalid/missing credentials, detached/unborn/changed context, provider errors and
+incomplete searches exit 1; cancellation exits 130. Authentication/access failures
+never mean “no matching PR.” Interactive errors leave Back/Check again available.
+No provider setup or credentials are required for offline Git use.
+
 ## Current scope and limits
 
 The overview shows repository location, attached/unborn/detached HEAD, configured
@@ -261,6 +334,13 @@ on Windows with Node 22.16.0 and 24.20.0. Isolated distribution tests exercise
 direct file patches and interactive file selection without installation. The
 existing six-job CI matrix still needs to confirm this milestone after push.
 
+Milestone 6 passed all 73 tests, type checking, and distribution freshness checks
+on Windows with Node 22.16.0 and 24.20.0. Tests use fake HTTP responses and disposable
+Git repositories, including isolated bundled direct/interactive online actions and
+offline behavior with broken provider configuration. A stalled fake transport also
+verified the 30-second deadline. Live Bitbucket credentials/API behavior and the
+Windows/macOS/Linux CI matrix still need separate confirmation.
+
 ## Direction
 
 Initial areas to explore include:
@@ -299,7 +379,9 @@ well-contained changes can usually be made directly and summarized afterward.
 See [AGENTS.md](AGENTS.md) for practical guidance for coding agents.
 
 Milestone 5 adds file-patch inspection to explicit local-branch comparisons.
-Commit-detail inspection is a possible next step using the same foundation. Graphs,
+Optional providers extend the local Git foundation through explicit configuration.
+Bitbucket Cloud is the first integration; issue/environment providers and commit
+details remain future work. No employer-specific workflow belongs in the core. Graphs,
 patch-equivalence analysis, and merge-conflict prediction remain outside scope.
 
 ## License

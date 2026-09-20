@@ -8,7 +8,7 @@ import { listLocalBranches, readBranchDetails } from '../src/core/branches.js';
 import { fixtureGit, repository } from './helpers.js';
 import { readComparison, readComparisonDetail } from '../src/core/comparison.js';
 
-const unusedComparison = { comparisonPatch: async () => { throw new Error('Unexpected patch'); }, compare: async () => { throw new Error('Unexpected comparison'); }, comparisonDetail: async () => { throw new Error('Unexpected comparison detail'); } };
+const unusedComparison = { prs: async () => { throw new Error('Unexpected online check'); }, comparisonPatch: async () => { throw new Error('Unexpected patch'); }, compare: async () => { throw new Error('Unexpected comparison'); }, comparisonDetail: async () => { throw new Error('Unexpected comparison detail'); } };
 const unusedBranches = { ...unusedComparison, branches: async () => { throw new Error('Unexpected branch list'); }, branch: async () => { throw new Error('Unexpected branch detail'); } };
 
 const overview: Overview = { root: '/repo', head: { kind: 'unborn', name: 'topic' }, upstream: { kind: 'none' }, changes: [], shallow: false, filtersDisabled: false };
@@ -54,7 +54,7 @@ test('overview and history refresh independently and preserve selection', async 
   });
   assert.deepEqual(calls, ['overview', 'overview', 'history', 'history']);
   assert.deepEqual(defaults, ['overview', 'overview', 'history']);
-  assert.deepEqual(menus[0], ['Repository overview', 'Recent commits', 'Local branches', 'Exit']);
+  assert.deepEqual(menus[0], ['Repository overview', 'Recent commits', 'Local branches', 'Check Bitbucket PRs (online)', 'Exit']);
   assert.deepEqual(menus[1], ['Back', 'Refresh']);
   assert.match(output, /No commits yet/);
 });
@@ -140,6 +140,7 @@ test('comparison navigation swaps captured tips, refreshes and returns to select
     overview: async () => overview, history: async () => history,
     branches: () => listLocalBranches(root), branch: (name) => readBranchDetails(root, name),
     compare: (a, b) => { pairs.push([a, b]); return readComparison(root, a, b); },
+    prs: unusedComparison.prs,
     comparisonPatch: unusedComparison.comparisonPatch,
     comparisonDetail: (comparison, view) => readComparisonDetail(comparison, view),
   });

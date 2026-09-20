@@ -1,3 +1,5 @@
+import type { PrCheck } from '../core/pr.js';
+import { prSession } from './pr.js';
 import type { BranchDetails, BranchList, Overview, RecentCommits } from '../core/types.js';
 import { branchChoice, renderBranchContext, renderBranchDetails } from './branches.js';
 import { renderHistory, renderOverview, safeText } from './render.js';
@@ -19,6 +21,7 @@ export function isCancellation(error: unknown): boolean {
 }
 
 export interface RepositoryOperations {
+  prs(): Promise<PrCheck>;
   overview(): Promise<Overview>;
   history(): Promise<RecentCommits>;
   branches(): Promise<BranchList>;
@@ -78,10 +81,12 @@ export async function interactiveSession(terminal: Terminal, operations: Reposit
   while (!signal?.aborted) {
     const action = await terminal.choose('Twiglet', [
       { name: 'Repository overview', value: 'overview' },
-      { name: 'Recent commits', value: 'history' }, { name: 'Local branches', value: 'branches' }, { name: 'Exit', value: 'exit' },
+      { name: 'Recent commits', value: 'history' }, { name: 'Local branches', value: 'branches' },
+      { name: 'Check Bitbucket PRs (online)', value: 'prs' }, { name: 'Exit', value: 'exit' },
     ], selected);
     if (action === 'exit') return;
     selected = action;
+    if (action === 'prs') { await prSession(terminal, operations.prs, signal); continue; }
     if (action === 'branches') { await branchSession(terminal, operations, signal); continue; }
     let navigation = 'refresh';
     while (navigation === 'refresh' && !signal?.aborted) {

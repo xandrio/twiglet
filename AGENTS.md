@@ -21,8 +21,9 @@ closed specification.
 - The primary experience is `tl` -> Repository overview, Recent commits, or Local
   branches, with Refresh/Back navigation. Direct `status`, `log --limit N`,
   `branches`, and `branch <name>` share core operations.
-- Call Git with argument arrays, never shell commands. Inspection must neither
-  mutate repositories nor contact remotes. Account for optional index writes,
+- Call Git with argument arrays, never shell commands. Local Git inspection must neither
+  mutate repositories nor contact remotes. Explicit provider operations may make
+  read-only API requests under their separately documented online contract. Account for optional index writes,
   partial-clone lazy fetching, external helpers, and inherited Git environment.
 - Commit the generated directly runnable JavaScript distribution and required
   third-party notices alongside source. No target-machine npm install, build,
@@ -147,3 +148,34 @@ Patch content is bounded to 1 MiB (reject, never silently truncate). No terminal
 escapes belong in core data. Escape controls in presentation, preserve newline
 markers, and keep full refs/IDs. This is inspection, not apply-ready patch export.
 No commit-detail UI or parent-selection policy is implemented yet.
+
+## Product direction and Milestone 6
+
+Twiglet is a generic public developer tool, combining local Git with optional,
+explicitly configured external context. Keep provider-specific concepts explicit;
+do not encode employer names, ticket prefixes, naming rules, cloud accounts, or
+private workflows. Future issue/environment integrations should use local user
+configuration, not source forks. Do not introduce a generic plugin framework.
+
+Milestone 6 adds Bitbucket Cloud only: `pr --online` and the explicitly online main
+menu action. `src/config/user.ts` loads versioned user-local JSON and environment
+credential references. `src/providers/bitbucket-cloud.ts` owns bounded GET requests
+and response validation. `src/core/pr.ts` composes captured Git context and provider
+observations; terminal rendering/navigation is separate. Existing offline commands
+must not load provider config, credentials, or call HTTP.
+
+Map canonical worktree roots explicitly to workspace/repository slugs. Search exact
+source branch names and verify same-repository identity across all PR states; no
+fork discovery or upstream-name inference. Distinguish no setup, incomplete search,
+no matches, multiple matches, provider failures and successful observations.
+Capture HEAD before checking and discard association if it changes. Report PR API
+tips and per-page observation times without implying live refs, fetch time, or
+atomic remote state. Missing optional PR fields are unavailable, not fabricated.
+
+Credentials come from referenced environment variables; no literal secrets in
+configuration, logs, errors or fixtures. Production API origin is fixed. Reject
+redirects and unsafe/repeated pagination URLs. Bound pages, bytes and duration;
+propagate cancellation. No persistent cache, fetch/pull, divergence analysis, Jira,
+environment provider, or provider framework is included. Offline workflows need
+neither configuration nor credentials. Keep fake-HTTP tests deterministic, and
+report live authentication/API validation separately from fixture validation.
