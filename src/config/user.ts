@@ -39,7 +39,13 @@ function envReference(value: unknown, field: string): string {
 }
 
 function credentialReference(value: unknown): CredentialReference {
-  const ref = object(value, ['source', 'name', 'service', 'account'], 'bitbucketCloud.tokenRef');
+  const ref = object(value, ['source', 'name', 'service', 'account', 'target'], 'bitbucketCloud.tokenRef');
+  if (ref.source === 'windows-credential-manager') {
+    object(value, ['source', 'target'], 'bitbucketCloud.tokenRef');
+    const target = string(ref.target, 'bitbucketCloud.tokenRef.target');
+    if (!target.trim() || target.length > 32767 || /[\x80-\x9f]/.test(target)) throw new ConfigurationError('Invalid Windows credential target.');
+    return { source: ref.source, target };
+  }
   if (ref.source === 'env') {
     object(value, ['source', 'name'], 'bitbucketCloud.tokenRef');
     return { source: 'env', name: envReference(ref.name, 'bitbucketCloud.tokenRef.name') };
@@ -53,7 +59,7 @@ function credentialReference(value: unknown): CredentialReference {
     if (service.length > 256) throw new ConfigurationError('Credential selector is too long.');
     return { source: ref.source, service, account };
   }
-  throw new ConfigurationError('Unsupported credential source. Windows native secure-store support is not yet implemented.');
+  throw new ConfigurationError('Unsupported credential source.');
 }
 
 export function resolveCloudEmail(setup: CloudSetup, env: NodeJS.ProcessEnv = process.env): string {

@@ -1123,15 +1123,15 @@ var require_route = __commonJS({
       };
     }
     function wrapConversion(toModel, graph) {
-      const path2 = [graph[toModel].parent, toModel];
+      const path3 = [graph[toModel].parent, toModel];
       let fn = conversions[graph[toModel].parent][toModel];
       let cur = graph[toModel].parent;
       while (graph[cur].parent) {
-        path2.unshift(graph[cur].parent);
+        path3.unshift(graph[cur].parent);
         fn = link(conversions[graph[cur].parent][cur], fn);
         cur = graph[cur].parent;
       }
-      fn.conversion = path2;
+      fn.conversion = path3;
       return fn;
     }
     module2.exports = function(fromModel) {
@@ -1802,12 +1802,12 @@ function sameHead(a, b) {
 }
 
 // src/config/user.ts
-var import_promises3 = require("node:fs/promises");
+var import_promises4 = require("node:fs/promises");
 var import_node_os = require("node:os");
-var import_node_path = __toESM(require("node:path"), 1);
+var import_node_path2 = __toESM(require("node:path"), 1);
 
 // src/credentials/resolve.ts
-var import_promises2 = require("node:fs/promises");
+var import_promises3 = require("node:fs/promises");
 var import_node_fs = require("node:fs");
 var import_node_child_process2 = require("node:child_process");
 
@@ -1832,6 +1832,134 @@ var Secret = class {
   }
 };
 
+// src/credentials/windows.ts
+var import_promises2 = require("node:fs/promises");
+var import_node_path = __toESM(require("node:path"), 1);
+var WINDOWS_BRIDGE_SCRIPT = String.raw`
+$ErrorActionPreference = 'Stop'
+$ProgressPreference = 'SilentlyContinue'
+[Console]::InputEncoding = [System.Text.UTF8Encoding]::new($false)
+[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
+$stage = 'capability'
+try {
+  $request = [Console]::In.ReadToEnd() | ConvertFrom-Json
+  if ($request.operation -ne 'probe' -and $request.operation -ne 'read') { throw 'Invalid operation' }
+  $name = [System.Reflection.AssemblyName]::GetAssemblyName($request.assembly)
+  if ($name.Name -ne 'gcmcore' -or $name.Version.Major -ne 2 -or $name.Version.Minor -lt 4 -or $name.Version.Minor -gt 9) { throw 'Unsupported assembly' }
+  $assembly = [System.Reflection.Assembly]::LoadFrom($request.assembly)
+  $framework = @($assembly.GetCustomAttributesData() | Where-Object { $_.AttributeType.FullName -eq 'System.Runtime.Versioning.TargetFrameworkAttribute' })
+  if ($framework.Count -ne 1 -or -not $framework[0].ConstructorArguments[0].Value.StartsWith('.NETFramework,')) { throw 'Unsupported runtime' }
+  $storeType = $assembly.GetType('GitCredentialManager.Interop.Windows.WindowsCredentialManager', $true)
+  $credentialType = $assembly.GetType('GitCredentialManager.Interop.Windows.WindowsCredential', $true)
+  $constructor = $storeType.GetConstructor([type[]]@([string]))
+  $get = $storeType.GetMethod('Get', [type[]]@([string], [string]))
+  if ($null -eq $constructor -or $null -eq $get -or $get.ReturnType.FullName -ne 'GitCredentialManager.ICredential') { throw 'Unsupported API' }
+  foreach ($property in @('TargetName', 'Password')) {
+    $info = $credentialType.GetProperty($property)
+    if ($null -eq $info -or $info.PropertyType -ne [string]) { throw 'Unsupported result' }
+  }
+  if ($request.operation -eq 'probe') { [Console]::Out.Write('AVAILABLE'); exit 0 }
+  $stage = 'read'
+  if ($request.target -isnot [string] -or [string]::IsNullOrWhiteSpace($request.target) -or $request.target.Length -gt 32767 -or $request.target -match '[\x00-\x1f\x7f-\x9f]') { throw 'Invalid target' }
+  $store = $constructor.Invoke([object[]]@($null))
+  $credential = $get.Invoke($store, [object[]]@($request.target, $null))
+  if ($null -eq $credential) { [Console]::Out.Write('MISSING'); exit 0 }
+  if ($credential.GetType() -ne $credentialType -or -not [string]::Equals($credential.TargetName, $request.target, [StringComparison]::Ordinal)) {
+    [Console]::Out.Write('MISMATCH'); exit 0
+  }
+  # No PowerShell pipeline/object output: only this private stdout pipe carries the selected secret.
+  $password = $credential.Password
+  [Console]::Out.Write('SECRET' + [char]10)
+  [Console]::Out.Write($password)
+} catch {
+  if ($stage -eq 'capability') { [Console]::Out.Write('UNAVAILABLE') }
+  else { [Console]::Out.Write('FAILED') }
+  exit 0
+}
+`;
+var inside = (root, candidate) => {
+  const relative = import_node_path.default.win32.relative(root, candidate);
+  return relative !== "" && !relative.startsWith("..") && !import_node_path.default.win32.isAbsolute(relative);
+};
+async function isFile(filename) {
+  try {
+    await (0, import_promises2.access)(filename);
+    return (await (0, import_promises2.stat)(filename)).isFile();
+  } catch {
+    return false;
+  }
+}
+async function discoverWindowsBridge(env, signal, run = runCredentialStore, available = isFile, canonical = import_promises2.realpath, invocationDirectory = process.cwd()) {
+  const systemRoot = environmentValue(env, "SystemRoot", "win32");
+  if (!systemRoot || !import_node_path.default.win32.isAbsolute(systemRoot)) return void 0;
+  const powershell = import_node_path.default.win32.join(systemRoot, "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
+  if (!await available(powershell)) return void 0;
+  const cleanEnv = childEnvironment(env, "win32", "credential");
+  for (const entry of (environmentValue(env, "PATH", "win32") ?? "").split(";")) {
+    const directory = entry.replace(/^"(.*)"$/, "$1");
+    if (!import_node_path.default.win32.isAbsolute(directory)) continue;
+    const candidate = import_node_path.default.win32.join(directory, "git.exe");
+    if (!await available(candidate)) continue;
+    const git2 = await canonical(candidate);
+    if (inside(invocationDirectory, git2)) return void 0;
+    const execPath = (await run({ executable: git2, args: ["--exec-path"], env: cleanEnv, cwd: systemRoot, signal })).trim();
+    if (!import_node_path.default.win32.isAbsolute(execPath)) return void 0;
+    const core = await canonical(execPath);
+    if (import_node_path.default.win32.basename(core) !== "git-core" || import_node_path.default.win32.basename(import_node_path.default.win32.dirname(core)) !== "libexec") return void 0;
+    const architectureRoot = import_node_path.default.win32.resolve(core, "..", "..");
+    if (!["mingw64", "mingw32", "clangarm64"].includes(import_node_path.default.win32.basename(architectureRoot))) return void 0;
+    const installation = import_node_path.default.win32.dirname(architectureRoot);
+    if (!inside(installation, git2) || inside(invocationDirectory, architectureRoot)) return void 0;
+    const packageDirectory = import_node_path.default.win32.join(architectureRoot, "bin");
+    const assemblyFile = import_node_path.default.win32.join(packageDirectory, "gcmcore.dll");
+    if (!await available(assemblyFile) || !await available(import_node_path.default.win32.join(packageDirectory, "git-credential-manager.exe"))) return void 0;
+    const assembly = await canonical(assemblyFile);
+    if (!inside(packageDirectory, assembly)) return void 0;
+    return { powershell, assembly, cwd: systemRoot };
+  }
+  return void 0;
+}
+async function invoke(bridge, operation, context, target) {
+  return (context.run ?? runCredentialStore)({
+    executable: bridge.powershell,
+    args: ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", WINDOWS_BRIDGE_SCRIPT],
+    input: JSON.stringify({ operation, assembly: bridge.assembly, ...target === void 0 ? {} : { target } }),
+    cwd: bridge.cwd,
+    env: childEnvironment(context.env ?? process.env, "win32", "credential"),
+    signal: context.signal
+  });
+}
+async function locate(context) {
+  if (context.signal?.aborted) throw new CredentialError("cancelled");
+  if ((context.platform ?? process.platform) !== "win32") return void 0;
+  const env = context.env ?? process.env;
+  return context.locateWindowsBridge ? context.locateWindowsBridge(env, context.signal) : discoverWindowsBridge(env, context.signal, context.run ?? runCredentialStore);
+}
+async function windowsCapability(context) {
+  try {
+    const bridge = await locate(context);
+    if (bridge && await invoke(bridge, "probe", context) === "AVAILABLE") return { available: true };
+  } catch (error) {
+    if (context.signal?.aborted || error instanceof CredentialError && error.kind === "cancelled") throw new CredentialError("cancelled");
+  }
+  return { available: false, reason: "Compatible installed GCM library / Windows PowerShell bridge unavailable or blocked. No fallback attempted." };
+}
+async function readWindowsCredential(target, context) {
+  try {
+    const bridge = await locate(context);
+    if (!bridge) throw new CredentialError("unavailable");
+    const output = await invoke(bridge, "read", context, target);
+    if (output === "MISSING") throw new CredentialError("missing");
+    if (output === "UNAVAILABLE") throw new CredentialError("unavailable");
+    if (!output.startsWith("SECRET\n")) throw new CredentialError("lookup-failed");
+    return output.slice(7);
+  } catch (error) {
+    if (context.signal?.aborted) throw new CredentialError("cancelled");
+    if (error instanceof CredentialError) throw new CredentialError(error.kind);
+    throw new CredentialError("lookup-failed");
+  }
+}
+
 // src/credentials/resolve.ts
 var CredentialError = class extends Error {
   constructor(kind) {
@@ -1849,8 +1977,8 @@ var CredentialError = class extends Error {
 };
 async function executableAvailable(executable) {
   try {
-    await (0, import_promises2.access)(executable, import_node_fs.constants.X_OK);
-    return (await (0, import_promises2.stat)(executable)).isFile();
+    await (0, import_promises3.access)(executable, import_node_fs.constants.X_OK);
+    return (await (0, import_promises3.stat)(executable)).isFile();
   } catch {
     return false;
   }
@@ -1858,6 +1986,7 @@ async function executableAvailable(executable) {
 async function credentialCapability(ref, context = {}) {
   const platform = context.platform ?? process.platform;
   if (ref.source === "env") return { available: true };
+  if (ref.source === "windows-credential-manager") return windowsCapability(context);
   const candidates = ref.source === "macos-keychain" && platform === "darwin" ? ["/usr/bin/security"] : ref.source === "linux-secret-service" && platform === "linux" ? ["/usr/bin/secret-tool", "/bin/secret-tool"] : [];
   for (const executable of candidates) if (await (context.available ?? executableAvailable)(executable)) return { available: true, executable };
   return { available: false };
@@ -1870,8 +1999,9 @@ var runCredentialStore = (request) => new Promise((resolve, reject) => {
   const child = (0, import_node_child_process2.spawn)(request.executable, request.args, {
     env: request.env,
     shell: false,
+    ...request.cwd ? { cwd: request.cwd } : {},
     windowsHide: true,
-    stdio: ["ignore", "pipe", "pipe"]
+    stdio: [request.input === void 0 ? "ignore" : "pipe", "pipe", "pipe"]
   });
   const chunks = [];
   let size = 0;
@@ -1884,6 +2014,8 @@ var runCredentialStore = (request) => new Promise((resolve, reject) => {
   request.signal?.addEventListener("abort", abort, { once: true });
   if (request.signal?.aborted) abort();
   const timer = setTimeout(() => stop("timeout"), 15e3);
+  child.stdin?.on("error", () => stop("lookup-failed"));
+  child.stdin?.end(request.input);
   child.stdout.on("data", (chunk) => {
     size += chunk.length;
     if (size > 16 * 1024) stop("invalid");
@@ -1924,6 +2056,7 @@ async function resolveCredential(ref, context = {}) {
   const platform = context.platform ?? process.platform;
   let value;
   if (ref.source === "env") value = environmentValue(env, ref.name, platform);
+  else if (ref.source === "windows-credential-manager") value = await readWindowsCredential(ref.target, context);
   else {
     try {
       const capability = await credentialCapability(ref, context);
@@ -1951,7 +2084,7 @@ async function resolveCredential(ref, context = {}) {
 var ConfigurationError = class extends Error {
 };
 function configPath(env = process.env, platform = process.platform, home = (0, import_node_os.homedir)()) {
-  return env.TWIGLET_CONFIG || (platform === "win32" ? import_node_path.default.join(env.APPDATA || import_node_path.default.join(home, "AppData", "Roaming"), "Twiglet", "config.json") : import_node_path.default.join(env.XDG_CONFIG_HOME || import_node_path.default.join(home, ".config"), "twiglet", "config.json"));
+  return env.TWIGLET_CONFIG || (platform === "win32" ? import_node_path2.default.join(env.APPDATA || import_node_path2.default.join(home, "AppData", "Roaming"), "Twiglet", "config.json") : import_node_path2.default.join(env.XDG_CONFIG_HOME || import_node_path2.default.join(home, ".config"), "twiglet", "config.json"));
 }
 function object(value, keys, field) {
   if (!value || typeof value !== "object" || Array.isArray(value) || Object.keys(value).some((key) => !keys.includes(key))) {
@@ -1972,7 +2105,13 @@ function envReference(value, field) {
   return name;
 }
 function credentialReference(value) {
-  const ref = object(value, ["source", "name", "service", "account"], "bitbucketCloud.tokenRef");
+  const ref = object(value, ["source", "name", "service", "account", "target"], "bitbucketCloud.tokenRef");
+  if (ref.source === "windows-credential-manager") {
+    object(value, ["source", "target"], "bitbucketCloud.tokenRef");
+    const target = string(ref.target, "bitbucketCloud.tokenRef.target");
+    if (!target.trim() || target.length > 32767 || /[\x80-\x9f]/.test(target)) throw new ConfigurationError("Invalid Windows credential target.");
+    return { source: ref.source, target };
+  }
   if (ref.source === "env") {
     object(value, ["source", "name"], "bitbucketCloud.tokenRef");
     return { source: "env", name: envReference(ref.name, "bitbucketCloud.tokenRef.name") };
@@ -1986,7 +2125,7 @@ function credentialReference(value) {
     if (service.length > 256) throw new ConfigurationError("Credential selector is too long.");
     return { source: ref.source, service, account };
   }
-  throw new ConfigurationError("Unsupported credential source. Windows native secure-store support is not yet implemented.");
+  throw new ConfigurationError("Unsupported credential source.");
 }
 function resolveCloudEmail(setup, env = process.env) {
   const email = "email" in setup.identity ? setup.identity.email : environmentValue(env, setup.identity.emailEnv);
@@ -1997,8 +2136,8 @@ async function loadCloudSetup(root, env = process.env) {
   let text2;
   try {
     const filename = configPath(env);
-    if ((await (0, import_promises3.stat)(filename)).size > 256 * 1024) throw new ConfigurationError("Configuration exceeds 256 KiB.");
-    text2 = await (0, import_promises3.readFile)(filename, "utf8");
+    if ((await (0, import_promises4.stat)(filename)).size > 256 * 1024) throw new ConfigurationError("Configuration exceeds 256 KiB.");
+    text2 = await (0, import_promises4.readFile)(filename, "utf8");
     if (Buffer.byteLength(text2) > 256 * 1024) throw new ConfigurationError("Configuration exceeds 256 KiB.");
   } catch (error) {
     if (error.code === "ENOENT") return void 0;
@@ -2022,24 +2161,24 @@ async function loadCloudSetup(root, env = process.env) {
   const tokenRef = "tokenEnv" in auth ? { source: "env", name: envReference(auth.tokenEnv, "bitbucketCloud.tokenEnv") } : credentialReference(auth.tokenRef);
   const sensitiveEnv = [..."emailEnv" in account ? [account.emailEnv] : [], ...tokenRef.source === "env" ? [tokenRef.name] : []];
   if (!Array.isArray(config.repositories)) throw new ConfigurationError("repositories must be an array.");
-  const actual = identity(await (0, import_promises3.realpath)(root));
+  const actual = identity(await (0, import_promises4.realpath)(root));
   const seen = /* @__PURE__ */ new Set();
   let mapping;
   for (const [index, value] of config.repositories.entries()) {
     const field = `repositories[${index}]`;
     const row = object(value, ["path", "bitbucketCloud"], field);
     const local = string(row.path, `${field}.path`);
-    if (!import_node_path.default.isAbsolute(local)) throw new ConfigurationError(`${field}.path must be absolute.`);
+    if (!import_node_path2.default.isAbsolute(local)) throw new ConfigurationError(`${field}.path must be absolute.`);
     const cloud = object(row.bitbucketCloud, ["workspace", "repository"], `${field}.bitbucketCloud`);
     const workspace = string(cloud.workspace, `${field}.bitbucketCloud.workspace`);
     const repository = string(cloud.repository, `${field}.bitbucketCloud.repository`);
     if (![workspace, repository].every((part) => /^[A-Za-z0-9_-]+$/.test(part))) throw new ConfigurationError(`${field}.bitbucketCloud requires workspace/repository slugs.`);
     let canonical;
     try {
-      canonical = identity(await (0, import_promises3.realpath)(local));
+      canonical = identity(await (0, import_promises4.realpath)(local));
     } catch (error) {
       if (error.code !== "ENOENT") throw new ConfigurationError(`Cannot resolve ${field}.path.`);
-      canonical = identity(import_node_path.default.normalize(local));
+      canonical = identity(import_node_path2.default.normalize(local));
     }
     if (seen.has(canonical)) throw new ConfigurationError("Duplicate repository mappings.");
     seen.add(canonical);
@@ -2211,7 +2350,6 @@ async function readDoctor(directory, checkCredentials = false, context = {}) {
   const add = (level, message2) => diagnostics.push({ level, message: message2 });
   const env = context.env ?? process.env;
   add("ok", "Child processes use restricted environments; provider credential variables are excluded.");
-  if ((context.platform ?? process.platform) === "win32") add("advisory", "Windows native secure-store support is not yet implemented. Environment credentials remain supported.");
   try {
     const { root } = await discover(directory, context.signal);
     const setup = await loadCloudSetup(root, env);
@@ -2223,12 +2361,16 @@ async function readDoctor(directory, checkCredentials = false, context = {}) {
       add("ok", "Bitbucket email identity available.");
       const ref = setup.tokenRef;
       add("advisory", `Credential source: ${ref.source}.`);
+      if (ref.source === "windows-credential-manager") {
+        add("advisory", `Expected target: ${ref.target}`);
+        add("advisory", "Windows Credential Manager uses an optional installed GCM library bridge. Capability does not imply vault access.");
+      }
       if (ref.source === "env") {
         add("advisory", "Environment credentials suit CI, headless use, and temporary sessions. OS storage is recommended for persistent desktop use where supported.");
         add(environmentValue(env, ref.name, context.platform) ? "ok" : "error", environmentValue(env, ref.name, context.platform) ? "Referenced environment variable is present; value not displayed." : "Referenced credential environment variable is missing or empty.");
       }
       const capability = await credentialCapability(ref, context);
-      add(capability.available ? "ok" : "error", capability.available ? "Credential adapter available; store access and credential validity are not implied." : "Configured credential adapter is unavailable on this machine. No fallback attempted.");
+      add(capability.available ? "ok" : "error", capability.available ? "Credential adapter available; store access and credential validity are not implied." : capability.reason ?? "Configured credential adapter is unavailable on this machine. No fallback attempted.");
       if (checkCredentials) {
         await withCredentialEnvironment(setup.sensitiveEnv, () => resolveCredential(ref, context));
         add("ok", "Credential successfully resolved locally. Bitbucket authentication was not tested.");
@@ -2267,11 +2409,6 @@ function outputStyle(stream, env = process.env) {
   return createStyle(Boolean(stream.isTTY) && env.TERM !== "dumb" && !env.NO_COLOR && env.FORCE_COLOR !== "0");
 }
 
-// src/terminal/doctor.ts
-function renderDoctor(report, style = plain) {
-  return [style.heading("Twiglet local diagnostics"), ...report.diagnostics.map((row) => row.level === "error" ? style.error(`Error: ${row.message}`) : row.level === "advisory" ? style.muted(`Note: ${row.message}`) : style.good(`OK: ${row.message}`))].join("\n") + "\n";
-}
-
 // src/terminal/render.ts
 function safeText(value) {
   return value.replace(
@@ -2279,9 +2416,9 @@ function safeText(value) {
     (char) => `\\u${char.charCodeAt(0).toString(16).padStart(4, "0")}`
   );
 }
-function displayPath(path2) {
-  const text2 = path2.toString("utf8");
-  if (!Buffer.from(text2).equals(path2)) return `[path bytes: ${path2.toString("hex")}]`;
+function displayPath(path3) {
+  const text2 = path3.toString("utf8");
+  if (!Buffer.from(text2).equals(path3)) return `[path bytes: ${path3.toString("hex")}]`;
   return safeText(text2);
 }
 function headLabel(head, style) {
@@ -2357,6 +2494,11 @@ function renderHistory(history, style = plain) {
 Showing ${history.limit} commits; more are available. Use tl log --limit N (up to 100).`);
   if (history.shallow) lines.push("\n" + style.warning("Shallow repository: only locally available history is shown."));
   return lines.join("\n") + "\n";
+}
+
+// src/terminal/doctor.ts
+function renderDoctor(report, style = plain) {
+  return [style.heading("Twiglet local diagnostics"), ...report.diagnostics.map((row) => row.level === "error" ? style.error(`Error: ${safeText(row.message)}`) : row.level === "advisory" ? style.muted(`Note: ${safeText(row.message)}`) : style.good(`OK: ${safeText(row.message)}`))].join("\n") + "\n";
 }
 
 // src/terminal/branches.ts
@@ -2769,9 +2911,9 @@ function fields(record2, count2) {
     meta.push(record2.subarray(start, end).toString("ascii"));
     start = end + 1;
   }
-  const path2 = record2.subarray(start);
-  if (!path2.length) invalid();
-  return { meta, path: Buffer.from(path2) };
+  const path3 = record2.subarray(start);
+  if (!path3.length) invalid();
+  return { meta, path: Buffer.from(path3) };
 }
 function parseStatus(data) {
   const records = [];
@@ -2798,17 +2940,17 @@ function parseStatus(data) {
     }
     const kind = String.fromCharCode(record2[0] ?? 0);
     if (kind === "?") {
-      const { path: path3 } = fields(record2, 1);
-      changes.push({ kind: "untracked", path: path3, index: "?", worktree: "?" });
+      const { path: path4 } = fields(record2, 1);
+      changes.push({ kind: "untracked", path: path4, index: "?", worktree: "?" });
       continue;
     }
     if (!["1", "2", "u"].includes(kind)) invalid();
-    const { meta, path: path2 } = fields(record2, kind === "1" ? 8 : kind === "2" ? 9 : 10);
+    const { meta, path: path3 } = fields(record2, kind === "1" ? 8 : kind === "2" ? 9 : 10);
     const xy = meta[1];
     if (!/^[.MADRCUT?!]{2}$/.test(xy)) invalid();
     const change = {
       kind: kind === "u" ? "conflict" : kind === "2" ? "renamed" : "tracked",
-      path: path2,
+      path: path3,
       index: xy[0],
       worktree: xy[1],
       submodule: meta[2]
@@ -4413,15 +4555,15 @@ function parseDiff(data) {
   const result = [];
   for (let i = 0; i < fields2.length; ) {
     const match = /^:(\d{6}) (\d{6}) ([0-9a-f]+) ([0-9a-f]+) ([AMDRT])(\d*)$/.exec(fields2[i++].toString("ascii"));
-    const path2 = fields2[i++];
-    if (!match || !path2?.length) throw new RepositoryError("Malformed Git file comparison.");
+    const path3 = fields2[i++];
+    if (!match || !path3?.length) throw new RepositoryError("Malformed Git file comparison.");
     const status = match[5];
-    const entry = { status, path: path2, submodule: match[1] === "160000" || match[2] === "160000", beforeMode: match[1], afterMode: match[2], beforeOid: match[3], afterOid: match[4] };
+    const entry = { status, path: path3, submodule: match[1] === "160000" || match[2] === "160000", beforeMode: match[1], afterMode: match[2], beforeOid: match[3], afterOid: match[4] };
     if (status === "R") {
       const destination = fields2[i++];
       const similarity = Number(match[6]);
       if (!destination?.length || !match[6] || similarity > 100) throw new RepositoryError("Malformed Git rename.");
-      entry.originalPath = path2;
+      entry.originalPath = path3;
       entry.path = destination;
       entry.similarity = similarity;
     }
@@ -4528,10 +4670,10 @@ async function readComparisonDetail(comparison, view, signal, run = runGit) {
   await verify(cwd, comparison, signal, run);
   return detail;
 }
-async function readComparisonPatch(comparison, view, path2, signal, run = runGit) {
+async function readComparisonPatch(comparison, view, path3, signal, run = runGit) {
   const detail = await readComparisonDetail(comparison, view, signal, run);
   if (detail.kind !== "files") throw new RepositoryError("File comparison required.");
-  const file = detail.allFiles.find((file2) => file2.path.equals(path2));
+  const file = detail.allFiles.find((file2) => file2.path.equals(path3));
   if (!file) throw new RepositoryError("No changed file with that exact repository-relative path.");
   const patch = await readSnapshotPatch(comparison.root, detail.before, detail.after, file, signal, run);
   await verify(comparison.root, comparison, signal, run);
@@ -4637,7 +4779,7 @@ async function main() {
       branches: () => listLocalBranches(directory, abort.signal),
       branch: (name) => readBranchDetails(directory, name, abort.signal),
       compare: (a, b) => readComparison(directory, a, b, abort.signal),
-      comparisonPatch: (comparison, view2, path2) => readComparisonPatch(comparison, view2, path2, abort.signal),
+      comparisonPatch: (comparison, view2, path3) => readComparisonPatch(comparison, view2, path3, abort.signal),
       comparisonDetail: (comparison, view2) => readComparisonDetail(comparison, view2, abort.signal)
     };
     if (command === "doctor") {

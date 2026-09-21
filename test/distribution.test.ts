@@ -341,3 +341,47 @@ process.on('exit', () => { if (!gitCalls) process.exitCode = 93; });
   assert.equal(badArgument.status, 1);
   assert(!badArgument.stderr.includes('synthetic-accidental-argument-token'), 'Unknown arguments are not echoed');
 });
+
+test('isolated Windows doctor uses only a synthetic bridge and never exposes its secret', { skip: process.platform !== 'win32' }, async t => {
+  const directory = await temp(t); const repo = await repository(t);
+  const entry = path.join(directory, 'twiglet.cjs'); const preload = path.join(directory, 'windows-bridge.cjs');
+  const config = path.join(directory, 'config.json');
+  await cp(path.join(project, 'dist', 'twiglet.cjs'), entry);
+  await assert.rejects(stat(path.join(directory, 'node_modules')), { code: 'ENOENT' });
+  await writeFile(config, JSON.stringify({ version: 1,
+    bitbucketCloud: { email: 'account@example.invalid', tokenRef: { source: 'windows-credential-manager', target: 'Twiglet/Synthetic/Test' } },
+    repositories: [{ path: repo, bitbucketCloud: { workspace: 'team', repository: 'repo' } }] }));
+  const mockProgram = "let s='';process.stdin.on('data',c=>s+=c);process.stdin.on('end',()=>{const r=JSON.parse(s);process.stdout.write(r.operation==='probe'?'AVAILABLE':'SECRET\\nsynthetic-bundle-windows-token');});";
+  await writeFile(preload, `
+const cp=require('node:child_process'); const fs=require('node:fs/promises');
+const originalSpawn=cp.spawn; let probes=0; let reads=0;
+const packageFile=p=>/[/\\\\](gcmcore.dll|git-credential-manager.exe)$/i.test(String(p));
+for (const name of ['access','stat','realpath']) {
+  const original=fs[name]; fs[name]=async function(p,...args) {
+    if(packageFile(p)) return name==='stat'?{isFile:()=>true}:name==='realpath'?p:undefined;
+    return original.call(this,p,...args);
+  };
+}
+cp.spawn=function(executable,args,options) {
+  if(/powershell.exe$/i.test(executable)) {
+    if(options.env.CUSTOM_PROVIDER_TOKEN || options.env.GCM_TRACE_SECRETS) process.exit(91);
+    const child=originalSpawn(process.execPath,['-e',${JSON.stringify(mockProgram)}],options);
+    const end=child.stdin.end.bind(child.stdin);
+    child.stdin.end=function(input,...rest) {const r=JSON.parse(input);if(r.operation==='probe') probes++;else if(r.operation==='read') reads++;else process.exit(92);return end(input,...rest);};
+    return child;
+  }
+  if(/credential-manager/i.test(executable)) process.exit(93);
+  return originalSpawn.apply(this,arguments);
+};
+global.fetch=async()=>{process.exit(94);};
+process.on('exit',()=>{if(probes!==1 || reads!==Number(process.env.EXPECT_READS))process.exitCode=95;});
+`);
+  for (const check of [false, true]) {
+    const result = invoke(entry, repo, ['doctor', ...(check ? ['--check-credentials'] : [])],
+      { ...childEnvironment(), TWIGLET_CONFIG: config, EXPECT_READS: check ? '1' : '0', CUSTOM_PROVIDER_TOKEN: 'synthetic-env-fallback', GCM_TRACE_SECRETS: 'true' }, preload);
+    assert(result.status === 0, `Synthetic bundled Windows doctor succeeds (status ${result.status}, check ${check}, unavailable ${result.stdout.includes('unavailable')})`);
+    assert(!result.stdout.includes('synthetic-bundle-windows-token') && !result.stderr.includes('synthetic-bundle-windows-token'), 'No credential output');
+    assert.match(result.stdout, check ? /successfully resolved locally/ : /Credential not resolved/);
+    assert.match(result.stdout, /Expected target: Twiglet\/Synthetic\/Test/);
+  }
+});

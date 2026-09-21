@@ -13,7 +13,6 @@ export async function readDoctor(directory: string, checkCredentials = false, co
   const add = (level: Diagnostic['level'], message: string) => diagnostics.push({ level, message });
   const env = context.env ?? process.env;
   add('ok', 'Child processes use restricted environments; provider credential variables are excluded.');
-  if ((context.platform ?? process.platform) === 'win32') add('advisory', 'Windows native secure-store support is not yet implemented. Environment credentials remain supported.');
   try {
     const { root } = await discover(directory, context.signal);
     const setup = await loadCloudSetup(root, env);
@@ -25,13 +24,17 @@ export async function readDoctor(directory: string, checkCredentials = false, co
       add('ok', 'Bitbucket email identity available.');
       const ref = setup.tokenRef;
       add('advisory', `Credential source: ${ref.source}.`);
+      if (ref.source === 'windows-credential-manager') {
+        add('advisory', `Expected target: ${ref.target}`);
+        add('advisory', 'Windows Credential Manager uses an optional installed GCM library bridge. Capability does not imply vault access.');
+      }
       if (ref.source === 'env') {
         add('advisory', 'Environment credentials suit CI, headless use, and temporary sessions. OS storage is recommended for persistent desktop use where supported.');
         add(environmentValue(env, ref.name, context.platform) ? 'ok' : 'error', environmentValue(env, ref.name, context.platform)
           ? 'Referenced environment variable is present; value not displayed.' : 'Referenced credential environment variable is missing or empty.');
       }
       const capability = await credentialCapability(ref, context);
-      add(capability.available ? 'ok' : 'error', capability.available ? 'Credential adapter available; store access and credential validity are not implied.' : 'Configured credential adapter is unavailable on this machine. No fallback attempted.');
+      add(capability.available ? 'ok' : 'error', capability.available ? 'Credential adapter available; store access and credential validity are not implied.' : capability.reason ?? 'Configured credential adapter is unavailable on this machine. No fallback attempted.');
       if (checkCredentials) {
         await withCredentialEnvironment(setup.sensitiveEnv, () => resolveCredential(ref, context));
         add('ok', 'Credential successfully resolved locally. Bitbucket authentication was not tested.');

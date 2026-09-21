@@ -154,7 +154,7 @@ test('doctor distinguishes configuration, adapter capability and explicit local 
   const report = await readDoctor(root, false, { env, platform: 'win32' });
   const output = renderDoctor(report);
   assert(report.ok); assert.match(output, /reference configured/); assert.match(output, /adapter available/);
-  assert.match(output, /Credential not resolved/); assert.match(output, /Windows native secure-store support is not yet implemented/);
+  assert.match(output, /Credential not resolved/);
   assert(!output.includes(fake));
   assert.equal(stripVTControlCharacters(renderDoctor(report, createStyle(true))), output);
   const checked = await readDoctor(root, true, { env });

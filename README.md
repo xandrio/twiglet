@@ -239,9 +239,40 @@ unlock prompt. Corporate policy, a locked store, or a missing desktop/session bu
 can prevent access. Lookup failure remains explicit; there is **no automatic
 fallback**, even when an environment token is available.
 
-Windows native credential-store support is not yet implemented. Environment
-references remain supported there, but are not the recommended persistent storage
-mechanism. Twiglet never writes environment credentials into shell/PowerShell
+Windows Credential Manager is supported through an optional installed GCM library
+bridge. Configure a literal, human-readable target:
+
+```json
+{ "source": "windows-credential-manager", "target": "Twiglet/Bitbucket/Personal" }
+```
+
+Create the Generic Credential manually in Windows Credential Manager's standard
+UI, using that exact target and the API token as its password. Twiglet only reads
+it; it never creates, changes, or deletes vault entries. Bitbucket identity still
+comes from `email` / `emailEnv`, independently of the stored Windows username.
+Do not include the `LegacyGeneric:target=` decoration used by some Windows tools.
+Target matching is exact and case-sensitive; a different returned target is rejected.
+
+The bridge discovers the selected Git installation through absolute PATH entries
+and `git --exec-path`, then checks its package-relative GCM library. Currently it
+supports the `mingw64`, `mingw32`, and `clangarm64` Git for Windows layouts with
+GCM 2.4–2.9 .NET Framework assemblies. It checks assembly identity, runtime and API
+shape; other versions/layouts fail explicitly. A separate standalone GCM install
+or a minimal Git distribution may therefore be unavailable. It does not search
+the repository for DLLs, install anything, or run GCM's credential CLI.
+
+Windows PowerShell runs without profiles, receives the target as JSON on stdin,
+and uses the existing precompiled GCM store API. There is no `Add-Type`, runtime
+C#/PInvoke compilation, execution-policy bypass, provider discovery, browser,
+OAuth, or network request. GCM internally enumerates the current user's vault;
+Twiglet verifies the returned target before accessing its password. This is an
+optional dependency on GCM's library implementation, not a stable public CLI
+contract. Corporate application control, restricted PowerShell, missing libraries,
+or alternate logon/sandbox contexts can prevent access. Twiglet never bypasses
+those restrictions or silently uses an environment token instead.
+
+Environment references remain supported on every platform, but are not the
+recommended persistent desktop storage mechanism. Twiglet never writes environment credentials into shell/PowerShell
 profiles, registry settings, `.env` files, configuration, or other persistent files.
 No OS helper is needed for the environment fallback or offline Git commands.
 
@@ -253,12 +284,24 @@ tl doctor --check-credentials
 Doctor inspects local configuration for the selected worktree. Its default mode
 distinguishes a configured reference, environment-variable presence, and adapter
 availability; it does not retrieve OS credentials or claim authentication works.
+For Windows, it shows the expected target and loads/checks the bridge without
+constructing a credential store or enumerating the vault.
 `--check-credentials` explicitly resolves the local credential and may prompt via
 the OS. Neither mode contacts Bitbucket or makes provider/network requests.
 Diagnostics never show values, fragments, lengths, or fingerprints of credentials.
 Environment-source guidance is advisory. Missing setup is valid for offline use;
 invalid setup, a missing configured env value, or an unavailable/failed source
 exits 1. Successful checks and advisories exit 0; cancellation exits 130.
+
+To switch an existing Windows Bitbucket setup, edit only the user-local config:
+replace `tokenEnv` (or the old `tokenRef`) with the Windows `tokenRef` above, keep
+the repository mapping, and keep either direct `email` or legacy `emailEnv`.
+Run `tl --repo <worktree> doctor` first, then
+`tl --repo <worktree> doctor --check-credentials` under the Windows account that
+owns the entry. Only after local resolution succeeds, explicitly run
+`tl --repo <worktree> pr --online` to test Bitbucket authentication. Existing env
+tokens are ignored while the Windows source is selected. No config is rewritten
+automatically, and credentials should never be pasted into config or commands.
 
 Credential lookup is bounded to 15 seconds and 16 KiB combined helper output.
 Helper stderr is discarded; unavailable adapters and lookup failures are explicit,
@@ -422,6 +465,14 @@ failures, private helper output, cancellation/timeouts, child-environment isolat
 local-only doctor, and isolated bundled execution without node_modules. No live
 Bitbucket credentials or real OS stores were used. The new six-job CI run and
 manual macOS/Secret Service permission/prompt behavior remain to be confirmed.
+
+Milestone 6.6 passed all 88 tests, type checking, and distribution freshness checks
+on Windows with Node 22.16.0 and 24.20.0. Windows credential tests use synthetic
+runner responses, including an isolated bundled doctor with a substituted helper;
+they never read the real vault. A separate capability-only probe recognized the
+installed GCM 2.4.1 assembly without retrieving a credential. Cross-platform CI
+and end-to-end manual acceptance with a user-provisioned Windows entry remain
+to be confirmed for this change.
 
 ## Direction
 

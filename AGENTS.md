@@ -193,7 +193,7 @@ copy OS secrets into process.env, cache them, or claim secure memory erasure.
 
 Optional read-only macOS Keychain and Linux Secret Service adapters invoke only
 fixed system utility locations, with bounded private output, no shell, and safe
-errors. No Windows native adapter yet. No provisioning, helper installation,
+errors. Windows support is described below. No provisioning, helper installation,
 arbitrary command source, credential writes, or silent fallback. OS storage is
 recommended for persistent desktop use; env references remain the universal
 CI/headless/temporary-session fallback. Never persist environment secrets.
@@ -213,3 +213,27 @@ do not claim provider authentication or scan arbitrary files for secrets.
 Use synthetic credentials and injectable store runners in tests. Never use real
 credentials in normal tests, failure output, fixtures, or the generated bundle.
 Real-store permission/prompt checks require separate manual acceptance.
+
+## Milestone 6.6 Windows Credential Manager
+
+`src/credentials/windows.ts` implements an optional installed-GCM-library bridge.
+The reference is `{ source: 'windows-credential-manager', target: 'literal target' }`.
+Targets are non-secret data; escape them in presentation. Preserve explicit email
+identity, legacy env config, and no-fallback behavior. Never provision credentials.
+
+Discover only known package-relative GCM layouts from the selected absolute PATH
+Git. Check assembly identity, .NET Framework runtime, version family (2.4–2.9), and
+API signatures. Invoke existing Windows PowerShell with a fixed script and JSON
+stdin, no profiles or policy bypass. Only the precompiled store Get method may
+read the vault. Do not invoke GCM get/fill/provider authentication, compile interop,
+or add a helper binary. GCM's internal enumeration is an accepted tradeoff; verify
+the returned literal TargetName before accessing Password. Probe mode must exit
+before store construction/enumeration. Library API compatibility is not guaranteed
+across upgrades: fail explicitly when incompatible, absent or policy-blocked.
+
+Keep helper stdout private and bounded, stderr discarded, and statuses secret-free.
+Do not inherit provider variables or GCM tracing/settings. Doctor never performs
+HTTP; only --check-credentials may read the entry. Automated tests use synthetic
+runner responses, never the user's actual vault. Local bridge-capability checks
+may load metadata but must not retrieve credentials. Real vault reads and provider
+authentication belong to separate manual acceptance.
