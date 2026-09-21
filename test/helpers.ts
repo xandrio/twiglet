@@ -5,6 +5,7 @@ import { mkdtemp, mkdir, readFile, readdir, realpath, rm, stat, symlink, writeFi
 import os from 'node:os';
 import path from 'node:path';
 import type { TestContext } from 'node:test';
+import { childEnvironment } from '../src/process/environment.js';
 
 export async function snapshot(root: string, prefix = ''): Promise<Record<string, string>> {
   const files: Record<string, string> = {};
@@ -45,7 +46,7 @@ export function fixtureGit(cwd: string, ...args: string[]): string {
     '-c', 'commit.gpgsign=false', '-c', 'core.hooksPath=', '-c', 'core.autocrlf=false', ...args,
   ], {
     cwd, encoding: 'utf8', windowsHide: true,
-    env: { ...process.env, GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: process.platform === 'win32' ? 'NUL' : '/dev/null',
+    env: { ...childEnvironment(), GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: process.platform === 'win32' ? 'NUL' : '/dev/null',
       GIT_AUTHOR_DATE: '2024-01-01T00:00:00Z', GIT_COMMITTER_DATE: '2024-01-01T00:00:00Z' },
     stdio: ['ignore', 'pipe', 'pipe'],
   }).trim();

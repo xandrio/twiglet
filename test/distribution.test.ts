@@ -5,9 +5,10 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 import { assertSameDirectory, directoryAlias, fixtureGit, repository, temp } from './helpers.js';
+import { childEnvironment } from '../src/process/environment.js';
 
 const project = fileURLToPath(new URL('../', import.meta.url));
-function invoke(entry: string, cwd: string, args: string[] = [], env = process.env, preload?: string) {
+function invoke(entry: string, cwd: string, args: string[] = [], env = childEnvironment(), preload?: string) {
   return spawnSync(process.execPath, [...(preload ? ['--require', preload] : []), entry, ...args], {
     cwd, env, encoding: 'utf8', timeout: 10_000, windowsHide: true,
   });
@@ -118,10 +119,10 @@ test('candidate checkout can be cloned and run without install, build, or node_m
   assert.equal(invoke(entry, directory, ['--repo']).status, 1);
   assert.equal(invoke(entry, directory, ['--unknown']).status, 1);
   assert.match(invoke(entry, directory).stderr, /not a git repository/i);
-  const injected = invoke(entry, nested, [], { ...process.env, GIT_DIR: path.join(checkout, '.git'), GIT_WORK_TREE: checkout });
+  const injected = invoke(entry, nested, [], { ...childEnvironment(), GIT_DIR: path.join(checkout, '.git'), GIT_WORK_TREE: checkout });
   assert.equal(injected.status, 0, injected.stderr);
   await assertLocation(injected.stdout, other);
-  const noGit = Object.fromEntries(Object.entries(process.env).filter(([key]) => key.toUpperCase() !== 'PATH'));
+  const noGit = Object.fromEntries(Object.entries(childEnvironment()).filter(([key]) => key.toUpperCase() !== 'PATH'));
   noGit.PATH = directory;
   const missing = invoke(entry, other, [], noGit);
   assert.equal(missing.status, 1);
@@ -194,7 +195,7 @@ process.on('exit', () => {
 });
 `;
     await writeFile(preload, boot.replace('__KEY__', JSON.stringify(cancel ? '\u0003' : '\r')));
-    const result = invoke(entry, repo, [], { ...process.env, TERM: 'xterm', NO_COLOR: color ? '' : '1', FORCE_COLOR: color ? '1' : '0' }, preload);
+    const result = invoke(entry, repo, [], { ...childEnvironment(), TERM: 'xterm', NO_COLOR: color ? '' : '1', FORCE_COLOR: color ? '1' : '0' }, preload);
     assert.equal(result.status, cancel ? 130 : 0, result.stderr + result.stdout);
     assert(!result.stderr.includes('RAW MODE LEAK'));
     assert.equal(/\x1b\[\d+(?:;\d+)*m/.test(result.stdout), Boolean(color));
@@ -237,7 +238,7 @@ process.stdout.write = function(chunk, ...args) {
 };
 process.on('exit', () => { if (input.isRaw || phase !== steps.length) process.exitCode = 9; });
 `);
-  const result = spawnSync(process.execPath, ['--require', preload, entry], { cwd: repo, encoding: 'utf8', timeout: 30_000, windowsHide: true, env: { ...process.env, TERM: 'xterm', NO_COLOR: '1', FORCE_COLOR: '0' } });
+  const result = spawnSync(process.execPath, ['--require', preload, entry], { cwd: repo, encoding: 'utf8', timeout: 30_000, windowsHide: true, env: { ...childEnvironment(), TERM: 'xterm', NO_COLOR: '1', FORCE_COLOR: '0' } });
   assert.equal(result.status, 0, result.stderr + result.stdout);
   assert.match(result.stdout, /Files: A tip → B tip/);
   assert.match(result.stdout, /Files: merge base → B tip/);
@@ -259,7 +260,7 @@ test('isolated bundle checks PRs explicitly online, preserves offline status and
   await assert.rejects(stat(path.join(directory, 'node_modules')), { code: 'ENOENT' });
   const config = path.join(directory, 'config.json'); const preload = path.join(directory, 'http.cjs');
   await writeFile(config, JSON.stringify({ version: 1, bitbucketCloud: { emailEnv: 'TEST_EMAIL', tokenEnv: 'TEST_TOKEN' }, repositories: [{ path: repo, bitbucketCloud: { workspace: 'team', repository: 'repo' } }] }));
-  const env = { ...process.env, TWIGLET_CONFIG: config, TEST_EMAIL: 'account@example.invalid', TEST_TOKEN: 'secret-test-token', TERM: 'xterm', NO_COLOR: '1' };
+  const env = { ...childEnvironment(), TWIGLET_CONFIG: config, TEST_EMAIL: 'account@example.invalid', TEST_TOKEN: 'secret-test-token', TERM: 'xterm', NO_COLOR: '1' };
   const http = String.raw`
 let calls = 0;
 global.fetch = async (url, options) => {
@@ -295,4 +296,48 @@ process.on('exit',()=>{if(input.isRaw || phase!==steps.length) process.exitCode=
   const interactive = invoke(entry, repo, [], { ...env, EXPECT_CALLS: '1' }, preload);
   assert.equal(interactive.status, 0, interactive.stderr + interactive.stdout);
   assert.match(interactive.stdout, /Bundled PR/);
+});
+
+
+test('isolated doctor is local-only and every Git child excludes provider environment variables', async t => {
+  const directory = await temp(t); const repo = await repository(t);
+  const entry = path.join(directory, 'twiglet.cjs');
+  await cp(path.join(project, 'dist', 'twiglet.cjs'), entry);
+  await assert.rejects(stat(path.join(directory, 'node_modules')), { code: 'ENOENT' });
+  const config = path.join(directory, 'config.json'); const preload = path.join(directory, 'guard.cjs');
+  await writeFile(preload, `
+const cp = require('node:child_process'); const spawn = cp.spawn; let gitCalls = 0;
+cp.spawn = function(command, args, options) {
+  if (command === 'git') gitCalls++;
+  if (!options?.env || ['CUSTOM_PROVIDER_CREDENTIAL','OTHER_PROVIDER_CREDENTIAL','NODE_OPTIONS'].some(k => Object.keys(options.env).some(n => n.toUpperCase() === k))) {
+    process.stderr.write('CHILD ENVIRONMENT POLICY FAILURE'); process.exit(91);
+  }
+  return spawn.apply(this, arguments);
+};
+global.fetch = async () => { process.stderr.write('UNEXPECTED NETWORK'); process.exit(92); };
+process.on('exit', () => { if (!gitCalls) process.exitCode = 93; });
+`);
+  const env = { ...childEnvironment(), TWIGLET_CONFIG: config, CUSTOM_PROVIDER_CREDENTIAL: 'synthetic-doctor-token',
+    OTHER_PROVIDER_CREDENTIAL: 'synthetic-other-token', NO_COLOR: '1' };
+  const auth = { email: 'account@example.invalid', tokenRef: { source: 'env', name: 'CUSTOM_PROVIDER_CREDENTIAL' } };
+  const write = (bitbucketCloud: unknown) => writeFile(config, JSON.stringify({ version: 1, bitbucketCloud,
+    repositories: [{ path: repo, bitbucketCloud: { workspace: 'team', repository: 'repo' } }] }));
+  await write(auth);
+  for (const args of [['doctor'], ['doctor', '--check-credentials'], ['status']]) {
+    const result = invoke(entry, repo, args, env, preload);
+    assert(result.status === 0, 'Bundled local check succeeds without network or secret inheritance');
+    assert(![env.CUSTOM_PROVIDER_CREDENTIAL, env.OTHER_PROVIDER_CREDENTIAL].some(secret => (result.stdout + result.stderr).includes(secret)), 'No secret output');
+    if (args[0] === 'doctor') assert.match(result.stdout, args.length > 1 ? /successfully resolved locally/ : /Credential not resolved/);
+  }
+  await writeFile(config, 'invalid configuration');
+  assert.equal(invoke(entry, repo, ['status'], env, preload).status, 0);
+  assert.equal(invoke(entry, repo, ['doctor'], env, preload).status, 1);
+  await write({ emailEnv: 'LEGACY_EMAIL', tokenEnv: 'CUSTOM_PROVIDER_CREDENTIAL' });
+  assert.equal(invoke(entry, repo, ['doctor', '--check-credentials'], { ...env, LEGACY_EMAIL: 'account@example.invalid' }, preload).status, 0);
+  await write({ ...auth, tokenRef: { source: 'macos-keychain', service: 'twiglet.test', account: 'test' } });
+  // Wrong-platform availability never attempts a lookup or falls back to env.
+  if (process.platform !== 'darwin') assert.equal(invoke(entry, repo, ['doctor', '--check-credentials'], env, preload).status, 1);
+  const badArgument = invoke(entry, repo, ['synthetic-accidental-argument-token'], env);
+  assert.equal(badArgument.status, 1);
+  assert(!badArgument.stderr.includes('synthetic-accidental-argument-token'), 'Unknown arguments are not echoed');
 });

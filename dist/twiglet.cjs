@@ -1623,10 +1623,83 @@ var RepositoryError = class extends Error {
   }
 };
 
+// src/process/environment.ts
+var import_node_async_hooks = require("node:async_hooks");
+var common = /* @__PURE__ */ new Set([
+  "PATH",
+  "HOME",
+  "TMPDIR",
+  "TMP",
+  "TEMP",
+  "USER",
+  "LOGNAME",
+  "XDG_CONFIG_HOME",
+  "XDG_CONFIG_DIRS",
+  "XDG_CACHE_HOME",
+  "XDG_DATA_HOME",
+  "XDG_DATA_DIRS",
+  "LANG",
+  "LANGUAGE",
+  "TZ",
+  "SSL_CERT_FILE",
+  "SSL_CERT_DIR",
+  "CURL_CA_BUNDLE",
+  "HTTP_PROXY",
+  "HTTPS_PROXY",
+  "ALL_PROXY",
+  "NO_PROXY",
+  "SSH_AUTH_SOCK",
+  "SSH_AGENT_PID"
+]);
+var windows = /* @__PURE__ */ new Set([
+  "SYSTEMROOT",
+  "WINDIR",
+  "SYSTEMDRIVE",
+  "COMSPEC",
+  "PATHEXT",
+  "USERPROFILE",
+  "HOMEDRIVE",
+  "HOMEPATH",
+  "APPDATA",
+  "LOCALAPPDATA",
+  "PROGRAMDATA",
+  "PROGRAMFILES",
+  "PROGRAMFILES(X86)",
+  "PROGRAMW6432",
+  "USERNAME",
+  "USERDOMAIN"
+]);
+var session = /* @__PURE__ */ new Set([
+  "DBUS_SESSION_BUS_ADDRESS",
+  "XDG_RUNTIME_DIR",
+  "DISPLAY",
+  "WAYLAND_DISPLAY",
+  "XAUTHORITY"
+]);
+var exclusions = new import_node_async_hooks.AsyncLocalStorage();
+var normalized = (name) => name.toUpperCase();
+function reservedCredentialName(name) {
+  const key = normalized(name);
+  return common.has(key) || windows.has(key) || session.has(key) || /^LC_[A-Z_]+$/.test(key) || /^(GIT_|NODE_|LD_|DYLD_)/.test(key) || key === "TWIGLET_CONFIG";
+}
+function withCredentialEnvironment(names, operation) {
+  return exclusions.run(/* @__PURE__ */ new Set([...exclusions.getStore() ?? [], ...names.map(normalized)]), operation);
+}
+function childEnvironment(env = process.env, platform = process.platform, purpose = "git", sensitive = []) {
+  const excluded = /* @__PURE__ */ new Set([...exclusions.getStore() ?? [], ...sensitive.map(normalized)]);
+  const result = {};
+  for (const [name, value] of Object.entries(env)) {
+    const key = normalized(name);
+    if (value === void 0 || excluded.has(key)) continue;
+    if (common.has(key) || /^LC_[A-Z_]+$/.test(key) || platform === "win32" && windows.has(key) || purpose === "credential" && platform !== "win32" && session.has(key)) result[name] = value;
+  }
+  return result;
+}
+
 // src/git/run.ts
 var MAX_OUTPUT = 16 * 1024 * 1024;
 function runGit(cwd, args, signal) {
-  const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !/^GIT_/i.test(key)));
+  const env = childEnvironment();
   Object.assign(env, {
     GIT_OPTIONAL_LOCKS: "0",
     GIT_NO_LAZY_FETCH: "1",
@@ -1665,7 +1738,7 @@ function runGit(cwd, args, signal) {
     child.stdout.on("data", collect(out));
     child.stderr.on("data", collect(err));
     child.on("error", (error) => {
-      failure = new RepositoryError(error.code === "ENOENT" ? "Could not start Git. Check that Git is on PATH and the repository directory exists." : `Could not start Git: ${error.message}`, { cause: error });
+      failure = new RepositoryError(error.code === "ENOENT" ? "Could not start Git. Check that Git is on PATH and the repository directory exists." : "Could not start Git. Check executable access and repository permissions.");
     });
     child.on("close", (code) => {
       clearTimeout(timer);
@@ -1729,9 +1802,152 @@ function sameHead(a, b) {
 }
 
 // src/config/user.ts
-var import_promises2 = require("node:fs/promises");
+var import_promises3 = require("node:fs/promises");
 var import_node_os = require("node:os");
 var import_node_path = __toESM(require("node:path"), 1);
+
+// src/credentials/resolve.ts
+var import_promises2 = require("node:fs/promises");
+var import_node_fs = require("node:fs");
+var import_node_child_process2 = require("node:child_process");
+
+// src/credentials/secret.ts
+var import_node_util = require("node:util");
+var Secret = class {
+  #value;
+  constructor(value) {
+    this.#value = value;
+  }
+  reveal() {
+    return this.#value;
+  }
+  toString() {
+    return "[redacted]";
+  }
+  toJSON() {
+    return "[redacted]";
+  }
+  [import_node_util.inspect.custom]() {
+    return "[redacted]";
+  }
+};
+
+// src/credentials/resolve.ts
+var CredentialError = class extends Error {
+  constructor(kind) {
+    super({
+      missing: "Configured credential is missing.",
+      unavailable: "Configured credential source is unavailable on this machine.",
+      "lookup-failed": "Credential lookup failed or access was denied.",
+      invalid: "Configured credential has an invalid value.",
+      cancelled: "Credential lookup cancelled.",
+      timeout: "Credential lookup timed out."
+    }[kind]);
+    this.kind = kind;
+  }
+  kind;
+};
+async function executableAvailable(executable) {
+  try {
+    await (0, import_promises2.access)(executable, import_node_fs.constants.X_OK);
+    return (await (0, import_promises2.stat)(executable)).isFile();
+  } catch {
+    return false;
+  }
+}
+async function credentialCapability(ref, context = {}) {
+  const platform = context.platform ?? process.platform;
+  if (ref.source === "env") return { available: true };
+  const candidates = ref.source === "macos-keychain" && platform === "darwin" ? ["/usr/bin/security"] : ref.source === "linux-secret-service" && platform === "linux" ? ["/usr/bin/secret-tool", "/bin/secret-tool"] : [];
+  for (const executable of candidates) if (await (context.available ?? executableAvailable)(executable)) return { available: true, executable };
+  return { available: false };
+}
+var runCredentialStore = (request) => new Promise((resolve, reject) => {
+  if (request.signal?.aborted) {
+    reject(new CredentialError("cancelled"));
+    return;
+  }
+  const child = (0, import_node_child_process2.spawn)(request.executable, request.args, {
+    env: request.env,
+    shell: false,
+    windowsHide: true,
+    stdio: ["ignore", "pipe", "pipe"]
+  });
+  const chunks = [];
+  let size = 0;
+  let failure;
+  const stop = (kind) => {
+    failure ??= new CredentialError(kind);
+    child.kill("SIGKILL");
+  };
+  const abort = () => stop("cancelled");
+  request.signal?.addEventListener("abort", abort, { once: true });
+  if (request.signal?.aborted) abort();
+  const timer = setTimeout(() => stop("timeout"), 15e3);
+  child.stdout.on("data", (chunk) => {
+    size += chunk.length;
+    if (size > 16 * 1024) stop("invalid");
+    else chunks.push(chunk);
+  });
+  child.stderr.on("data", (chunk) => {
+    size += chunk.length;
+    if (size > 16 * 1024) stop("invalid");
+  });
+  child.on("error", () => {
+    failure ??= new CredentialError("lookup-failed");
+  });
+  child.on("close", (code) => {
+    clearTimeout(timer);
+    request.signal?.removeEventListener("abort", abort);
+    if (failure) {
+      reject(failure);
+      return;
+    }
+    if (code !== 0) {
+      reject(new CredentialError("lookup-failed"));
+      return;
+    }
+    try {
+      resolve(new TextDecoder("utf-8", { fatal: true }).decode(Buffer.concat(chunks)));
+    } catch {
+      reject(new CredentialError("invalid"));
+    }
+  });
+});
+function environmentValue(env, name, platform = process.platform) {
+  if (platform !== "win32") return env[name];
+  return Object.entries(env).find(([key]) => key.toUpperCase() === name.toUpperCase())?.[1];
+}
+async function resolveCredential(ref, context = {}) {
+  if (context.signal?.aborted) throw new CredentialError("cancelled");
+  const env = context.env ?? process.env;
+  const platform = context.platform ?? process.platform;
+  let value;
+  if (ref.source === "env") value = environmentValue(env, ref.name, platform);
+  else {
+    try {
+      const capability = await credentialCapability(ref, context);
+      if (!capability.executable) throw new CredentialError("unavailable");
+      const args = ref.source === "macos-keychain" ? ["find-generic-password", "-s", ref.service, "-a", ref.account, "-w"] : ["lookup", "application", "twiglet", "account", ref.account];
+      value = await (context.run ?? runCredentialStore)({
+        executable: capability.executable,
+        args,
+        env: childEnvironment(env, platform, "credential"),
+        signal: context.signal
+      });
+      value = value.replace(/\r?\n$/, "");
+    } catch (error) {
+      if (context.signal?.aborted) throw new CredentialError("cancelled");
+      if (error instanceof CredentialError) throw new CredentialError(error.kind);
+      throw new CredentialError("lookup-failed");
+    }
+  }
+  if (!value) throw new CredentialError("missing");
+  if (Buffer.byteLength(value) > 16 * 1024 || /[\x00-\x1f\x7f]/.test(value)) throw new CredentialError("invalid");
+  return new Secret(value);
+}
+
+// src/config/user.ts
 var ConfigurationError = class extends Error {
 };
 function configPath(env = process.env, platform = process.platform, home = (0, import_node_os.homedir)()) {
@@ -1748,12 +1964,41 @@ function string(value, field) {
   return value;
 }
 var identity = (value) => process.platform === "win32" ? value.toLowerCase() : value;
+function envReference(value, field) {
+  const name = string(value, field);
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name) || reservedCredentialName(name)) {
+    throw new ConfigurationError("Credential/identity references must name dedicated environment variables, not execution or session settings.");
+  }
+  return name;
+}
+function credentialReference(value) {
+  const ref = object(value, ["source", "name", "service", "account"], "bitbucketCloud.tokenRef");
+  if (ref.source === "env") {
+    object(value, ["source", "name"], "bitbucketCloud.tokenRef");
+    return { source: "env", name: envReference(ref.name, "bitbucketCloud.tokenRef.name") };
+  }
+  if (ref.source === "macos-keychain" || ref.source === "linux-secret-service") {
+    object(value, ref.source === "macos-keychain" ? ["source", "service", "account"] : ["source", "account"], "bitbucketCloud.tokenRef");
+    const account = string(ref.account, "bitbucketCloud.tokenRef.account");
+    if (account.length > 256) throw new ConfigurationError("Credential selector is too long.");
+    if (ref.source === "linux-secret-service") return { source: ref.source, account };
+    const service = string(ref.service, "bitbucketCloud.tokenRef.service");
+    if (service.length > 256) throw new ConfigurationError("Credential selector is too long.");
+    return { source: ref.source, service, account };
+  }
+  throw new ConfigurationError("Unsupported credential source. Windows native secure-store support is not yet implemented.");
+}
+function resolveCloudEmail(setup, env = process.env) {
+  const email = "email" in setup.identity ? setup.identity.email : environmentValue(env, setup.identity.emailEnv);
+  if (!email || /[\x00-\x1f\x7f:]/.test(email)) throw new ConfigurationError("Missing or invalid Bitbucket email identity.");
+  return email;
+}
 async function loadCloudSetup(root, env = process.env) {
   let text2;
   try {
     const filename = configPath(env);
-    if ((await (0, import_promises2.stat)(filename)).size > 256 * 1024) throw new ConfigurationError("Configuration exceeds 256 KiB.");
-    text2 = await (0, import_promises2.readFile)(filename, "utf8");
+    if ((await (0, import_promises3.stat)(filename)).size > 256 * 1024) throw new ConfigurationError("Configuration exceeds 256 KiB.");
+    text2 = await (0, import_promises3.readFile)(filename, "utf8");
     if (Buffer.byteLength(text2) > 256 * 1024) throw new ConfigurationError("Configuration exceeds 256 KiB.");
   } catch (error) {
     if (error.code === "ENOENT") return void 0;
@@ -1768,12 +2013,16 @@ async function loadCloudSetup(root, env = process.env) {
   }
   const config = object(json, ["version", "bitbucketCloud", "repositories"], "root");
   if (config.version !== 1) throw new ConfigurationError("Unsupported configuration version; expected 1.");
-  const auth = object(config.bitbucketCloud, ["emailEnv", "tokenEnv"], "bitbucketCloud");
-  const emailEnv = string(auth.emailEnv, "bitbucketCloud.emailEnv");
-  const tokenEnv = string(auth.tokenEnv, "bitbucketCloud.tokenEnv");
-  if (![emailEnv, tokenEnv].every((name) => /^[A-Za-z_][A-Za-z0-9_]*$/.test(name))) throw new ConfigurationError("Credential references must be environment-variable names.");
+  const auth = object(config.bitbucketCloud, ["email", "emailEnv", "tokenEnv", "tokenRef"], "bitbucketCloud");
+  if ("email" in auth === "emailEnv" in auth || "tokenEnv" in auth === "tokenRef" in auth) {
+    throw new ConfigurationError("Configure exactly one email/emailEnv and one tokenRef/tokenEnv.");
+  }
+  const account = "email" in auth ? { email: string(auth.email, "bitbucketCloud.email") } : { emailEnv: envReference(auth.emailEnv, "bitbucketCloud.emailEnv") };
+  if ("email" in account && account.email.includes(":")) throw new ConfigurationError("Invalid Bitbucket email identity.");
+  const tokenRef = "tokenEnv" in auth ? { source: "env", name: envReference(auth.tokenEnv, "bitbucketCloud.tokenEnv") } : credentialReference(auth.tokenRef);
+  const sensitiveEnv = [..."emailEnv" in account ? [account.emailEnv] : [], ...tokenRef.source === "env" ? [tokenRef.name] : []];
   if (!Array.isArray(config.repositories)) throw new ConfigurationError("repositories must be an array.");
-  const actual = identity(await (0, import_promises2.realpath)(root));
+  const actual = identity(await (0, import_promises3.realpath)(root));
   const seen = /* @__PURE__ */ new Set();
   let mapping;
   for (const [index, value] of config.repositories.entries()) {
@@ -1787,7 +2036,7 @@ async function loadCloudSetup(root, env = process.env) {
     if (![workspace, repository].every((part) => /^[A-Za-z0-9_-]+$/.test(part))) throw new ConfigurationError(`${field}.bitbucketCloud requires workspace/repository slugs.`);
     let canonical;
     try {
-      canonical = identity(await (0, import_promises2.realpath)(local));
+      canonical = identity(await (0, import_promises3.realpath)(local));
     } catch (error) {
       if (error.code !== "ENOENT") throw new ConfigurationError(`Cannot resolve ${field}.path.`);
       canonical = identity(import_node_path.default.normalize(local));
@@ -1797,11 +2046,7 @@ async function loadCloudSetup(root, env = process.env) {
     if (canonical === actual) mapping = { workspace, repository };
   }
   if (!mapping) return void 0;
-  const email = env[emailEnv];
-  const token = env[tokenEnv];
-  if (!email || !token) throw new ConfigurationError("Missing credentials: set the environment variables referenced by bitbucketCloud.emailEnv and tokenEnv.");
-  if (/[\r\n:]/.test(email) || /[\r\n]/.test(token)) throw new ConfigurationError("Invalid credential environment values.");
-  return { mapping, email, token };
+  return { mapping, identity: account, tokenRef, sensitiveEnv };
 }
 
 // src/providers/bitbucket-cloud.ts
@@ -1834,8 +2079,9 @@ async function observePullRequests(setup, branch, signal, transport = fetch) {
   url.searchParams.set("q", `source.branch.name = ${JSON.stringify(branch)}`);
   for (const state of ["OPEN", "MERGED", "DECLINED", "SUPERSEDED"]) url.searchParams.append("state", state);
   url.searchParams.set("pagelen", "50");
-  const authorization = `Basic ${Buffer.from(`${setup.email}:${setup.token}`).toString("base64")}`;
-  const redact = (value) => [authorization, authorization.slice(6), setup.token, setup.email].reduce((text2, secret) => text2.replaceAll(secret, "[redacted]"), value);
+  const token = setup.token.reveal();
+  const authorization = `Basic ${Buffer.from(`${setup.email}:${token}`).toString("base64")}`;
+  const redact = (value) => [authorization, authorization.slice(6), token, setup.email].reduce((text2, secret) => text2.replaceAll(secret, "[redacted]"), value);
   const deadline = AbortSignal.timeout(3e4);
   const requestSignal = signal ? AbortSignal.any([signal, deadline]) : deadline;
   const prs = [];
@@ -1882,7 +2128,7 @@ async function observePullRequests(setup, branch, signal, transport = fetch) {
         throw new ProviderError("invalid-response", "Bitbucket returned invalid JSON data.");
       }
     } catch (error) {
-      if (signal?.aborted) throw error;
+      if (signal?.aborted) throw new ProviderError("network", "Bitbucket check cancelled.");
       if (error instanceof ProviderError) throw error;
       throw new ProviderError("network", deadline.aborted ? "Bitbucket check timed out after 30 seconds." : "Bitbucket network request failed.");
     }
@@ -1942,17 +2188,59 @@ async function checkPullRequests(directory, signal, env = process.env, transport
   try {
     const setup = await loadCloudSetup(root, env);
     if (!setup) return { kind: "not-configured", message: "Bitbucket Cloud is not configured for this worktree. Add an explicit mapping in user configuration." };
-    const observation = await observePullRequests(setup, head.name, signal, transport);
-    if (!sameHead(head, await readHead(cwd, signal))) return { kind: "local-context", message: "HEAD changed during the check. Check again to associate PRs with the current branch." };
-    return { kind: "observed", root, branch: head.name, headOid: head.oid, repository: `${setup.mapping.workspace}/${setup.mapping.repository}`, observation };
+    return await withCredentialEnvironment(setup.sensitiveEnv, async () => {
+      const email = resolveCloudEmail(setup, env);
+      const token = await resolveCredential(setup.tokenRef, { env, signal });
+      const observation = await observePullRequests({ mapping: setup.mapping, email, token }, head.name, signal, transport);
+      if (!sameHead(head, await readHead(cwd, signal))) return { kind: "local-context", message: "HEAD changed during the check. Check again to associate PRs with the current branch." };
+      return { kind: "observed", root, branch: head.name, headOid: head.oid, repository: `${setup.mapping.workspace}/${setup.mapping.repository}`, observation };
+    });
   } catch (error) {
     if (signal?.aborted) throw error;
     if (error instanceof ConfigurationError) return { kind: "configuration", message: error.message };
+    if (error instanceof CredentialError) return { kind: "configuration", message: error.message };
     if (error instanceof ProviderError) return { kind: "provider", message: `${error.kind}: ${error.message}` };
     throw error;
   }
 }
 var prCheckSucceeded = (check) => check.kind === "observed" && check.observation.complete;
+
+// src/core/doctor.ts
+async function readDoctor(directory, checkCredentials = false, context = {}) {
+  const diagnostics = [];
+  const add = (level, message2) => diagnostics.push({ level, message: message2 });
+  const env = context.env ?? process.env;
+  add("ok", "Child processes use restricted environments; provider credential variables are excluded.");
+  if ((context.platform ?? process.platform) === "win32") add("advisory", "Windows native secure-store support is not yet implemented. Environment credentials remain supported.");
+  try {
+    const { root } = await discover(directory, context.signal);
+    const setup = await loadCloudSetup(root, env);
+    if (!setup) add("advisory", "Bitbucket Cloud: not configured for this worktree. Offline Git use needs no provider setup.");
+    else {
+      add("ok", "Configuration schema accepted; literal credential fields are prohibited.");
+      add("ok", "Bitbucket Cloud: credential reference configured.");
+      resolveCloudEmail(setup, env);
+      add("ok", "Bitbucket email identity available.");
+      const ref = setup.tokenRef;
+      add("advisory", `Credential source: ${ref.source}.`);
+      if (ref.source === "env") {
+        add("advisory", "Environment credentials suit CI, headless use, and temporary sessions. OS storage is recommended for persistent desktop use where supported.");
+        add(environmentValue(env, ref.name, context.platform) ? "ok" : "error", environmentValue(env, ref.name, context.platform) ? "Referenced environment variable is present; value not displayed." : "Referenced credential environment variable is missing or empty.");
+      }
+      const capability = await credentialCapability(ref, context);
+      add(capability.available ? "ok" : "error", capability.available ? "Credential adapter available; store access and credential validity are not implied." : "Configured credential adapter is unavailable on this machine. No fallback attempted.");
+      if (checkCredentials) {
+        await withCredentialEnvironment(setup.sensitiveEnv, () => resolveCredential(ref, context));
+        add("ok", "Credential successfully resolved locally. Bitbucket authentication was not tested.");
+      } else add("advisory", "Credential not resolved. Use doctor --check-credentials to check local access; OS prompts may appear.");
+    }
+  } catch (error) {
+    if (context.signal?.aborted) throw new CredentialError("cancelled");
+    add("error", error instanceof ConfigurationError || error instanceof CredentialError ? error.message : "Unable to inspect local repository or credential capability.");
+  }
+  add("ok", "No provider/network requests performed.");
+  return { ok: !diagnostics.some((row) => row.level === "error"), diagnostics };
+}
 
 // src/terminal/style.ts
 function createStyle(enabled) {
@@ -1977,6 +2265,11 @@ function createStyle(enabled) {
 var plain = createStyle(false);
 function outputStyle(stream, env = process.env) {
   return createStyle(Boolean(stream.isTTY) && env.TERM !== "dumb" && !env.NO_COLOR && env.FORCE_COLOR !== "0");
+}
+
+// src/terminal/doctor.ts
+function renderDoctor(report, style = plain) {
+  return [style.heading("Twiglet local diagnostics"), ...report.diagnostics.map((row) => row.level === "error" ? style.error(`Error: ${row.message}`) : row.level === "advisory" ? style.muted(`Note: ${row.message}`) : style.good(`OK: ${row.message}`))].join("\n") + "\n";
 }
 
 // src/terminal/render.ts
@@ -2566,7 +2859,7 @@ async function readUpstream(cwd, head, shallow, signal, run = runGit, verifyHead
     if (result.code !== 0) throw new RepositoryError(result.stderr.trim() || "Cannot read upstream configuration.");
     return result.stdout.toString("utf8").split("\0").slice(0, -1);
   };
-  const inspect = async () => {
+  const inspect2 = async () => {
     if (head.kind === "detached") return unavailable("detached", "Detached HEAD has no current-branch upstream.");
     const remotes = await config(`branch.${head.name}.remote`);
     const merges = await config(`branch.${head.name}.merge`);
@@ -2589,7 +2882,7 @@ async function readUpstream(cwd, head, shallow, signal, run = runGit, verifyHead
     return { kind: "compared", target, headOid: head.oid, upstreamOid, ...counts };
   };
   try {
-    const result = await inspect();
+    const result = await inspect2();
     if (verifyHead && !sameHead(head, await readHead(cwd, signal, run))) return unavailable("changed-head", "HEAD changed during inspection. Refresh to compare the current HEAD.");
     return result;
   } catch (error) {
@@ -2815,11 +3108,11 @@ var ValidationError = class extends Error {
 };
 
 // node_modules/@inquirer/core/dist/esm/lib/use-state.js
-var import_node_async_hooks2 = require("node:async_hooks");
+var import_node_async_hooks3 = require("node:async_hooks");
 
 // node_modules/@inquirer/core/dist/esm/lib/hook-engine.js
-var import_node_async_hooks = require("node:async_hooks");
-var hookStorage = new import_node_async_hooks.AsyncLocalStorage();
+var import_node_async_hooks2 = require("node:async_hooks");
+var hookStorage = new import_node_async_hooks2.AsyncLocalStorage();
 function createStore(rl) {
   const store = {
     rl,
@@ -2870,7 +3163,7 @@ function withUpdates(fn) {
     store.handleChange = oldHandleChange;
     return returnValue;
   };
-  return import_node_async_hooks.AsyncResource.bind(wrapped);
+  return import_node_async_hooks2.AsyncResource.bind(wrapped);
 }
 function withPointer(cb) {
   const store = getStore();
@@ -2926,7 +3219,7 @@ var effectScheduler = {
 // node_modules/@inquirer/core/dist/esm/lib/use-state.js
 function useState(defaultValue) {
   return withPointer((pointer) => {
-    const setState = import_node_async_hooks2.AsyncResource.bind(function setState2(newValue) {
+    const setState = import_node_async_hooks3.AsyncResource.bind(function setState2(newValue) {
       if (pointer.get() !== newValue) {
         pointer.set(newValue);
         handleChange();
@@ -2967,7 +3260,7 @@ function isUnicodeSupported() {
   import_node_process.default.env["ConEmuTask"] === "{cmd::Cmder}" || // ConEmu and cmder
   import_node_process.default.env["TERM_PROGRAM"] === "Terminus-Sublime" || import_node_process.default.env["TERM_PROGRAM"] === "vscode" || import_node_process.default.env["TERM"] === "xterm-256color" || import_node_process.default.env["TERM"] === "alacritty" || import_node_process.default.env["TERMINAL_EMULATOR"] === "JetBrains-JediTerm";
 }
-var common = {
+var common2 = {
   circleQuestionMark: "(?)",
   questionMarkPrefix: "(?)",
   square: "█",
@@ -3236,11 +3529,11 @@ var specialFallbackSymbols = {
   oneTenth: "1/10"
 };
 var mainSymbols = {
-  ...common,
+  ...common2,
   ...specialMainSymbols
 };
 var fallbackSymbols = {
-  ...common,
+  ...common2,
   ...specialFallbackSymbols
 };
 var shouldUseMain = isUnicodeSupported();
@@ -3466,7 +3759,7 @@ function usePagination({ items, active, renderItem, pageSize, loop = true }) {
 
 // node_modules/@inquirer/core/dist/esm/lib/create-prompt.js
 var readline2 = __toESM(require("node:readline"), 1);
-var import_node_async_hooks3 = require("node:async_hooks");
+var import_node_async_hooks4 = require("node:async_hooks");
 var import_mute_stream = __toESM(require_lib(), 1);
 
 // node_modules/signal-exit/dist/mjs/signals.js
@@ -3721,7 +4014,7 @@ var {
 } = signalExitWrap(processOk(process3) ? new SignalExit(process3) : new SignalExitFallback());
 
 // node_modules/@inquirer/core/dist/esm/lib/screen-manager.js
-var import_node_util = require("node:util");
+var import_node_util2 = require("node:util");
 
 // node_modules/@inquirer/ansi/dist/esm/index.js
 var ESC = "\x1B[";
@@ -3759,7 +4052,7 @@ var ScreenManager = class {
   }
   render(content, bottomContent = "") {
     const promptLine = lastLine(content);
-    const rawPromptLine = (0, import_node_util.stripVTControlCharacters)(promptLine);
+    const rawPromptLine = (0, import_node_util2.stripVTControlCharacters)(promptLine);
     let prompt = rawPromptLine;
     if (this.rl.line.length > 0) {
       prompt = prompt.slice(0, -this.rl.line.length);
@@ -3865,7 +4158,7 @@ function createPrompt(view) {
     rl.input.on("keypress", checkCursorPos);
     cleanups.add(() => rl.input.removeListener("keypress", checkCursorPos));
     return withHooks(rl, (cycle) => {
-      const hooksCleanup = import_node_async_hooks3.AsyncResource.bind(() => effectScheduler.clearAll());
+      const hooksCleanup = import_node_async_hooks4.AsyncResource.bind(() => effectScheduler.clearAll());
       rl.on("close", hooksCleanup);
       cleanups.add(() => rl.removeListener("close", hooksCleanup));
       cycle(() => {
@@ -4255,6 +4548,7 @@ Usage: tl [--repo <directory>] [status]
        tl [--repo <directory>] compare <A> <B> [--view commits-a|commits-b|tips|since-base]
        tl [--repo <directory>] compare <A> <B> --view tips|since-base --file <path>
        tl [--repo <directory>] pr --online
+       tl [--repo <directory>] doctor [--check-credentials]
        tl --help
        tl --version
 
@@ -4268,6 +4562,7 @@ tips compares A tip to B tip; since-base compares their single merge base to B.
 Unavailable upstream comparison does not fail an otherwise useful overview.
 pr --online checks same-repository Bitbucket Cloud PRs using user-local configuration.
 Other inspection commands remain offline.
+doctor checks local setup only; --check-credentials may trigger OS permission prompts.
 Requires Node 22+ and installed Git. No fetch or repository changes.
 `;
 async function main() {
@@ -4282,13 +4577,14 @@ async function main() {
   let information;
   let repoSet = false;
   let online = false;
+  let checkCredentials = false;
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
     if (arg === "--repo" && !repoSet) {
       if (!args[i + 1] || args[i + 1].startsWith("--")) throw new Error("--repo requires a directory.");
       directory = args[++i];
       repoSet = true;
-    } else if ((arg === "status" || arg === "log" || arg === "branches" || arg === "branch" || arg === "compare" || arg === "pr") && !command) {
+    } else if ((arg === "status" || arg === "log" || arg === "branches" || arg === "branch" || arg === "compare" || arg === "pr" || arg === "doctor") && !command) {
       command = arg;
       if (arg === "branch") {
         branchName = args[++i];
@@ -4301,6 +4597,7 @@ async function main() {
         comparisonNames = [a, b];
       }
     } else if (arg === "--online" && !online) online = true;
+    else if (arg === "--check-credentials" && !checkCredentials) checkCredentials = true;
     else if (arg === "--view" && view === void 0) {
       const value = args[++i];
       if (!value || !["commits-a", "commits-b", "tips", "since-base"].includes(value)) throw new Error("--view requires commits-a, commits-b, tips, or since-base.");
@@ -4314,7 +4611,7 @@ async function main() {
       limit = Number(value);
     } else if (arg === "--help" || arg === "-h") information = "help";
     else if (arg === "--version") information = "version";
-    else throw new Error(`Unknown argument: ${arg}. Use --help for usage.`);
+    else throw new Error("Unknown or repeated argument. Use --help for usage.");
   }
   if (information) {
     process.stdout.write(information === "help" ? help : "0.6.0\n");
@@ -4325,6 +4622,7 @@ async function main() {
   if (file !== void 0 && (command !== "compare" || view !== "tips" && view !== "since-base")) throw new Error("--file requires compare with --view tips or since-base.");
   if (command === "pr" && !online) throw new Error("pr requires --online to explicitly request a Bitbucket Cloud check.");
   if (online && command !== "pr") throw new Error("--online is only supported with pr.");
+  if (checkCredentials && command !== "doctor") throw new Error("--check-credentials is only supported with doctor.");
   const abort = new AbortController();
   const interrupt = () => abort.abort();
   process.on("SIGINT", interrupt);
@@ -4342,7 +4640,12 @@ async function main() {
       comparisonPatch: (comparison, view2, path2) => readComparisonPatch(comparison, view2, path2, abort.signal),
       comparisonDetail: (comparison, view2) => readComparisonDetail(comparison, view2, abort.signal)
     };
-    if (command === "pr") {
+    if (command === "doctor") {
+      if (checkCredentials) process.stdout.write("Checking local credential access; an OS permission/unlock prompt may appear. No network requests.\n");
+      const report = await readDoctor(directory, checkCredentials, { signal: abort.signal });
+      process.stdout.write(renderDoctor(report, style));
+      if (!report.ok) process.exitCode = 1;
+    } else if (command === "pr") {
       const result = await operations.prs();
       process.stdout.write(renderPrCheck(result, style));
       if (!prCheckSucceeded(result)) process.exitCode = 1;

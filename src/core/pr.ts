@@ -1,5 +1,7 @@
 import { discover, readHead, sameHead } from './discovery.js';
-import { loadCloudSetup, ConfigurationError } from '../config/user.js';
+import { loadCloudSetup, resolveCloudEmail, ConfigurationError } from '../config/user.js';
+import { resolveCredential, CredentialError } from '../credentials/resolve.js';
+import { withCredentialEnvironment } from '../process/environment.js';
 import { observePullRequests, ProviderError } from '../providers/bitbucket-cloud.js';
 import type { HttpTransport, PrObservation } from '../providers/bitbucket-cloud.js';
 
@@ -14,12 +16,17 @@ export async function checkPullRequests(directory: string, signal?: AbortSignal,
   try {
     const setup = await loadCloudSetup(root, env);
     if (!setup) return { kind: 'not-configured', message: 'Bitbucket Cloud is not configured for this worktree. Add an explicit mapping in user configuration.' };
-    const observation = await observePullRequests(setup, head.name, signal, transport);
-    if (!sameHead(head, await readHead(cwd, signal))) return { kind: 'local-context', message: 'HEAD changed during the check. Check again to associate PRs with the current branch.' };
-    return { kind: 'observed', root, branch: head.name, headOid: head.oid, repository: `${setup.mapping.workspace}/${setup.mapping.repository}`, observation };
+    return await withCredentialEnvironment(setup.sensitiveEnv, async (): Promise<PrCheck> => {
+      const email = resolveCloudEmail(setup, env);
+      const token = await resolveCredential(setup.tokenRef, { env, signal });
+      const observation = await observePullRequests({ mapping: setup.mapping, email, token }, head.name, signal, transport);
+      if (!sameHead(head, await readHead(cwd, signal))) return { kind: 'local-context', message: 'HEAD changed during the check. Check again to associate PRs with the current branch.' };
+      return { kind: 'observed', root, branch: head.name, headOid: head.oid, repository: `${setup.mapping.workspace}/${setup.mapping.repository}`, observation };
+    });
   } catch (error) {
     if (signal?.aborted) throw error;
     if (error instanceof ConfigurationError) return { kind: 'configuration', message: error.message };
+    if (error instanceof CredentialError) return { kind: 'configuration', message: error.message };
     if (error instanceof ProviderError) return { kind: 'provider', message: `${error.kind}: ${error.message}` };
     throw error;
   }

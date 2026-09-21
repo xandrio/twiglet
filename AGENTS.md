@@ -174,10 +174,42 @@ atomic remote state. Missing optional PR fields are unavailable, not fabricated.
 PR commit hashes may be 12-character abbreviations: preserve and label them, rather
 than treating them as full local Git object IDs or adding resolution requests.
 
-Credentials come from referenced environment variables; no literal secrets in
+Credentials come from explicit references; no literal secrets in
 configuration, logs, errors or fixtures. Production API origin is fixed. Reject
 redirects and unsafe/repeated pagination URLs. Bound pages, bytes and duration;
 propagate cancellation. No persistent cache, fetch/pull, divergence analysis, Jira,
 environment provider, or provider framework is included. Offline workflows need
 neither configuration nor credentials. Keep fake-HTTP tests deterministic, and
 report live authentication/API validation separately from fixture validation.
+
+## Milestone 6.5 credential hardening
+
+`src/config/user.ts` returns references and identity, never resolved tokens.
+Prefer direct non-secret `email` plus `tokenRef`; retain legacy `emailEnv` and
+`tokenEnv` indefinitely without rewriting files. `src/credentials` resolves only
+the selected source and wraps tokens against accidental serialization. Providers
+receive explicit resolved credentials; no ambient environment access. Do not
+copy OS secrets into process.env, cache them, or claim secure memory erasure.
+
+Optional read-only macOS Keychain and Linux Secret Service adapters invoke only
+fixed system utility locations, with bounded private output, no shell, and safe
+errors. No Windows native adapter yet. No provisioning, helper installation,
+arbitrary command source, credential writes, or silent fallback. OS storage is
+recommended for persistent desktop use; env references remain the universal
+CI/headless/temporary-session fallback. Never persist environment secrets.
+
+`src/process/environment.ts` owns OS-aware child environment construction. Preserve
+normal home/config/temp/PATH, certificate/proxy and SSH-agent settings; exclude
+application variables and runtime injection. Configured reference names are also
+excluded via an operation-scoped context. Credential references cannot name
+execution/session variables. All future child processes must use this policy;
+do not spread process.env into spawn options. Existing offline Git operations
+still do not load provider configuration or resolve credentials.
+
+`doctor` is an explicit local-only config/capability diagnostic. Only
+`doctor --check-credentials` resolves a credential and may cause OS prompts.
+Neither performs HTTP. Keep configured, adapter available, and resolved distinct;
+do not claim provider authentication or scan arbitrary files for secrets.
+Use synthetic credentials and injectable store runners in tests. Never use real
+credentials in normal tests, failure output, fixtures, or the generated bundle.
+Real-store permission/prompt checks require separate manual acceptance.

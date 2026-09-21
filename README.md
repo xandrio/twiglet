@@ -178,8 +178,8 @@ Create a user-local JSON file outside repositories:
 {
   "version": 1,
   "bitbucketCloud": {
-    "emailEnv": "TWIGLET_BITBUCKET_EMAIL",
-    "tokenEnv": "TWIGLET_BITBUCKET_TOKEN"
+    "email": "developer@example.com",
+    "tokenRef": { "source": "env", "name": "TWIGLET_BITBUCKET_TOKEN" }
   },
   "repositories": [
     {
@@ -199,13 +199,84 @@ aliases. Each linked worktree needs its own explicit mapping. Remote URLs are no
 used to guess mappings. Duplicate mappings and unknown config fields are errors.
 The file is limited to 256 KiB. No config file is automatically created or modified.
 
-Set the referenced email and token environment variables in your local development
-environment. Use the Atlassian account email and a user-scoped Bitbucket API token
+This example uses the universal environment fallback for CI, headless use, or a
+temporary session. For persistent desktop use, OS credential storage is recommended
+where supported (see below). Use the Atlassian account email and a user-scoped Bitbucket API token
 with `read:pullrequest:bitbucket`; the user must have access to the mapped repository.
 This uses Basic authentication over HTTPS to `api.bitbucket.org`.
 See [Bitbucket Cloud authentication](https://developer.atlassian.com/cloud/bitbucket/rest/intro/).
-Do not put credential values in JSON, repository files, or command arguments.
-Twiglet does not provide credential storage or log raw API errors/authorization.
+Do not put tokens in JSON, repository files, or command arguments. Email is a
+non-secret identity field. Twiglet does not log raw API errors or authorization.
+
+### Credential sources and local diagnostics
+
+Existing version-1 `emailEnv` / `tokenEnv` configuration remains supported; files
+are never automatically rewritten. New configuration should normally use direct
+`email` plus `tokenRef`. Exactly one of `email` / `emailEnv` and exactly one of
+`tokenRef` / `tokenEnv` is allowed. Literal token/password fields are rejected.
+Environment references must use dedicated names, not execution/session settings
+such as `PATH`, `HOME`, proxy settings, or `SSH_AUTH_SOCK`.
+
+The following alternatives replace just `tokenRef`:
+
+```json
+{ "source": "macos-keychain", "service": "twiglet.bitbucket", "account": "personal" }
+```
+
+```json
+{ "source": "linux-secret-service", "account": "personal" }
+```
+
+macOS reads an existing generic-password item matching the service/account using
+`/usr/bin/security`. Linux reads an existing Secret Service item matching attributes
+`application=twiglet` and `account=personal`, using an already-installed
+`/usr/bin/secret-tool` or `/bin/secret-tool`. Use a unique matching item. These
+selectors are non-secret identifiers. Neither adapter searches arbitrary executables
+on PATH, installs software, writes credentials, or changes store access settings.
+The user provisions items separately using trusted OS tools; never put a token in
+a provisioning command's arguments. Store access may trigger an OS permission or
+unlock prompt. Corporate policy, a locked store, or a missing desktop/session bus
+can prevent access. Lookup failure remains explicit; there is **no automatic
+fallback**, even when an environment token is available.
+
+Windows native credential-store support is not yet implemented. Environment
+references remain supported there, but are not the recommended persistent storage
+mechanism. Twiglet never writes environment credentials into shell/PowerShell
+profiles, registry settings, `.env` files, configuration, or other persistent files.
+No OS helper is needed for the environment fallback or offline Git commands.
+
+```text
+tl doctor
+tl doctor --check-credentials
+```
+
+Doctor inspects local configuration for the selected worktree. Its default mode
+distinguishes a configured reference, environment-variable presence, and adapter
+availability; it does not retrieve OS credentials or claim authentication works.
+`--check-credentials` explicitly resolves the local credential and may prompt via
+the OS. Neither mode contacts Bitbucket or makes provider/network requests.
+Diagnostics never show values, fragments, lengths, or fingerprints of credentials.
+Environment-source guidance is advisory. Missing setup is valid for offline use;
+invalid setup, a missing configured env value, or an unavailable/failed source
+exits 1. Successful checks and advisories exit 0; cancellation exits 130.
+
+Credential lookup is bounded to 15 seconds and 16 KiB combined helper output.
+Helper stderr is discarded; unavailable adapters and lookup failures are explicit,
+but a denied/locked/missing item cannot always be distinguished reliably by the
+utilities. API tokens must be nonempty UTF-8 text without control characters.
+OS stores protect persistent storage; they are not isolation from a compromised
+user session, privileged process, or Twiglet itself. The in-memory secret wrapper
+prevents accidental serialization, not guaranteed memory erasure.
+
+All child processes use a reviewed environment policy rather than inheriting every
+application variable. Git retains executable lookup, home/XDG configuration, temp,
+locale, certificate paths, proxy settings, SSH-agent references, and Windows system
+paths. Existing `GIT_*` injection guards remain; Node/dynamic-loader injection
+variables are not forwarded. Credential-store helpers additionally receive desktop
+session variables. Configured credential references are centrally excluded, and
+arbitrary provider variables are absent even before config loads. OS-resolved
+tokens are never put into `process.env`. This policy does not sanitize secrets a
+user independently placed in Git configuration, proxy URLs, or repository content.
 
 Search scope is **same-repository PRs, exact source branch name, all PR states**.
 Source repository identity is checked as well as branch name; fork/cross-repository
@@ -342,8 +413,15 @@ Git repositories, including isolated bundled direct/interactive online actions a
 offline behavior with broken provider configuration. A stalled fake transport also
 verified the 30-second deadline. A subsequent live check against a disposable
 Bitbucket repository confirmed PR discovery and exposed 12-character API tip
-hashes; the adapter now preserves and labels these abbreviations. The
-Windows/macOS/Linux CI matrix still needs separate confirmation.
+hashes; the adapter now preserves and labels these abbreviations. Live Bitbucket
+validation and the Windows/macOS/Linux CI matrix were subsequently accepted.
+
+Milestone 6.5 passed all 82 tests, type checking, and distribution freshness checks
+on Windows with Node 22.16.0 and 24.20.0. This includes synthetic credential-source
+failures, private helper output, cancellation/timeouts, child-environment isolation,
+local-only doctor, and isolated bundled execution without node_modules. No live
+Bitbucket credentials or real OS stores were used. The new six-job CI run and
+manual macOS/Secret Service permission/prompt behavior remain to be confirmed.
 
 ## Direction
 

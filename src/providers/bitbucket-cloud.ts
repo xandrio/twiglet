@@ -1,4 +1,7 @@
-import type { CloudSetup } from '../config/user.js';
+import type { CloudMapping } from '../config/user.js';
+import type { Secret } from '../credentials/secret.js';
+
+export interface CloudCredentials { mapping: CloudMapping; email: string; token: Secret }
 
 /** tip preserves the API hash, which may be a 12-character abbreviation. */
 export interface PrSide { repository: string | null; branch: string | null; tip: string | null }
@@ -25,15 +28,16 @@ function side(value: unknown): PrSide {
 }
 
 /** One bounded, read-only observation. Production origin cannot be configured. */
-export async function observePullRequests(setup: CloudSetup, branch: string, signal?: AbortSignal, transport: HttpTransport = fetch): Promise<PrObservation> {
+export async function observePullRequests(setup: CloudCredentials, branch: string, signal?: AbortSignal, transport: HttpTransport = fetch): Promise<PrObservation> {
   const repository = `${setup.mapping.workspace}/${setup.mapping.repository}`;
   const endpoint = `/2.0/repositories/${encodeURIComponent(setup.mapping.workspace)}/${encodeURIComponent(setup.mapping.repository)}/pullrequests`;
   let url = new URL(`https://api.bitbucket.org${endpoint}`);
   url.searchParams.set('q', `source.branch.name = ${JSON.stringify(branch)}`);
   for (const state of ['OPEN', 'MERGED', 'DECLINED', 'SUPERSEDED']) url.searchParams.append('state', state);
   url.searchParams.set('pagelen', '50');
-  const authorization = `Basic ${Buffer.from(`${setup.email}:${setup.token}`).toString('base64')}`;
-  const redact = (value: string) => [authorization, authorization.slice(6), setup.token, setup.email]
+  const token = setup.token.reveal();
+  const authorization = `Basic ${Buffer.from(`${setup.email}:${token}`).toString('base64')}`;
+  const redact = (value: string) => [authorization, authorization.slice(6), token, setup.email]
     .reduce((text, secret) => text.replaceAll(secret, '[redacted]'), value);
   const deadline = AbortSignal.timeout(30_000);
   const requestSignal = signal ? AbortSignal.any([signal, deadline]) : deadline;
@@ -70,7 +74,7 @@ export async function observePullRequests(setup: CloudSetup, branch: string, sig
       try { data = record(JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(Buffer.concat(chunks)))); }
       catch { throw new ProviderError('invalid-response', 'Bitbucket returned invalid JSON data.'); }
     } catch (error) {
-      if (signal?.aborted) throw error;
+      if (signal?.aborted) throw new ProviderError('network', 'Bitbucket check cancelled.');
       if (error instanceof ProviderError) throw error;
       throw new ProviderError('network', deadline.aborted ? 'Bitbucket check timed out after 30 seconds.' : 'Bitbucket network request failed.');
     }

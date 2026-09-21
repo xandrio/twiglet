@@ -1,9 +1,15 @@
 import { readFile, realpath, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import path from 'node:path';
+import type { CredentialReference } from '../credentials/resolve.js';
+import { environmentValue } from '../credentials/resolve.js';
+import { reservedCredentialName } from '../process/environment.js';
 
 export interface CloudMapping { workspace: string; repository: string }
-export interface CloudSetup { mapping: CloudMapping; email: string; token: string }
+export interface CloudSetup {
+  mapping: CloudMapping; identity: { email: string } | { emailEnv: string };
+  tokenRef: CredentialReference; sensitiveEnv: string[];
+}
 export class ConfigurationError extends Error {}
 
 export function configPath(env: NodeJS.ProcessEnv = process.env, platform = process.platform, home = homedir()): string {
@@ -24,7 +30,39 @@ function string(value: unknown, field: string): string {
 }
 const identity = (value: string) => process.platform === 'win32' ? value.toLowerCase() : value;
 
-/** Read only for an explicitly requested online operation. Never include values in errors. */
+function envReference(value: unknown, field: string): string {
+  const name = string(value, field);
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name) || reservedCredentialName(name)) {
+    throw new ConfigurationError('Credential/identity references must name dedicated environment variables, not execution or session settings.');
+  }
+  return name;
+}
+
+function credentialReference(value: unknown): CredentialReference {
+  const ref = object(value, ['source', 'name', 'service', 'account'], 'bitbucketCloud.tokenRef');
+  if (ref.source === 'env') {
+    object(value, ['source', 'name'], 'bitbucketCloud.tokenRef');
+    return { source: 'env', name: envReference(ref.name, 'bitbucketCloud.tokenRef.name') };
+  }
+  if (ref.source === 'macos-keychain' || ref.source === 'linux-secret-service') {
+    object(value, ref.source === 'macos-keychain' ? ['source', 'service', 'account'] : ['source', 'account'], 'bitbucketCloud.tokenRef');
+    const account = string(ref.account, 'bitbucketCloud.tokenRef.account');
+    if (account.length > 256) throw new ConfigurationError('Credential selector is too long.');
+    if (ref.source === 'linux-secret-service') return { source: ref.source, account };
+    const service = string(ref.service, 'bitbucketCloud.tokenRef.service');
+    if (service.length > 256) throw new ConfigurationError('Credential selector is too long.');
+    return { source: ref.source, service, account };
+  }
+  throw new ConfigurationError('Unsupported credential source. Windows native secure-store support is not yet implemented.');
+}
+
+export function resolveCloudEmail(setup: CloudSetup, env: NodeJS.ProcessEnv = process.env): string {
+  const email = 'email' in setup.identity ? setup.identity.email : environmentValue(env, setup.identity.emailEnv);
+  if (!email || /[\x00-\x1f\x7f:]/.test(email)) throw new ConfigurationError('Missing or invalid Bitbucket email identity.');
+  return email;
+}
+
+/** Read only for explicit provider setup or doctor. Does not resolve credentials. */
 export async function loadCloudSetup(root: string, env: NodeJS.ProcessEnv = process.env): Promise<CloudSetup | undefined> {
   let text: string;
   try {
@@ -41,10 +79,16 @@ export async function loadCloudSetup(root: string, env: NodeJS.ProcessEnv = proc
   try { json = JSON.parse(text); } catch { throw new ConfigurationError('User configuration is not valid JSON.'); }
   const config = object(json, ['version', 'bitbucketCloud', 'repositories'], 'root');
   if (config.version !== 1) throw new ConfigurationError('Unsupported configuration version; expected 1.');
-  const auth = object(config.bitbucketCloud, ['emailEnv', 'tokenEnv'], 'bitbucketCloud');
-  const emailEnv = string(auth.emailEnv, 'bitbucketCloud.emailEnv');
-  const tokenEnv = string(auth.tokenEnv, 'bitbucketCloud.tokenEnv');
-  if (![emailEnv, tokenEnv].every(name => /^[A-Za-z_][A-Za-z0-9_]*$/.test(name))) throw new ConfigurationError('Credential references must be environment-variable names.');
+  const auth = object(config.bitbucketCloud, ['email', 'emailEnv', 'tokenEnv', 'tokenRef'], 'bitbucketCloud');
+  if (('email' in auth) === ('emailEnv' in auth) || ('tokenEnv' in auth) === ('tokenRef' in auth)) {
+    throw new ConfigurationError('Configure exactly one email/emailEnv and one tokenRef/tokenEnv.');
+  }
+  const account = 'email' in auth ? { email: string(auth.email, 'bitbucketCloud.email') }
+    : { emailEnv: envReference(auth.emailEnv, 'bitbucketCloud.emailEnv') };
+  if ('email' in account && account.email.includes(':')) throw new ConfigurationError('Invalid Bitbucket email identity.');
+  const tokenRef: CredentialReference = 'tokenEnv' in auth
+    ? { source: 'env', name: envReference(auth.tokenEnv, 'bitbucketCloud.tokenEnv') } : credentialReference(auth.tokenRef);
+  const sensitiveEnv = [...('emailEnv' in account ? [account.emailEnv] : []), ...(tokenRef.source === 'env' ? [tokenRef.name] : [])];
   if (!Array.isArray(config.repositories)) throw new ConfigurationError('repositories must be an array.');
   const actual = identity(await realpath(root));
   const seen = new Set<string>();
@@ -69,8 +113,5 @@ export async function loadCloudSetup(root: string, env: NodeJS.ProcessEnv = proc
     if (canonical === actual) mapping = { workspace, repository };
   }
   if (!mapping) return undefined;
-  const email = env[emailEnv]; const token = env[tokenEnv];
-  if (!email || !token) throw new ConfigurationError('Missing credentials: set the environment variables referenced by bitbucketCloud.emailEnv and tokenEnv.');
-  if (/[\r\n:]/.test(email) || /[\r\n]/.test(token)) throw new ConfigurationError('Invalid credential environment values.');
-  return { mapping, email, token };
+  return { mapping, identity: account, tokenRef, sensitiveEnv };
 }

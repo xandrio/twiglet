@@ -1,12 +1,13 @@
 import { spawn } from 'node:child_process';
 import { RepositoryError } from '../core/types.js';
+import { childEnvironment } from '../process/environment.js';
 
 export interface GitResult { code: number; stdout: Buffer; stderr: string }
 const MAX_OUTPUT = 16 * 1024 * 1024;
 
 /** No shell, no stdin, no inherited Git redirection/config injection. */
 export function runGit(cwd: string, args: string[], signal?: AbortSignal): Promise<GitResult> {
-  const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !/^GIT_/i.test(key)));
+  const env = childEnvironment();
   Object.assign(env, {
     GIT_OPTIONAL_LOCKS: '0', GIT_NO_LAZY_FETCH: '1', GIT_TERMINAL_PROMPT: '0',
     GIT_PAGER: 'cat', LC_ALL: 'C',
@@ -38,7 +39,7 @@ export function runGit(cwd: string, args: string[], signal?: AbortSignal): Promi
     child.on('error', (error: NodeJS.ErrnoException) => {
       failure = new RepositoryError(error.code === 'ENOENT'
         ? 'Could not start Git. Check that Git is on PATH and the repository directory exists.'
-        : `Could not start Git: ${error.message}`, { cause: error });
+        : 'Could not start Git. Check executable access and repository permissions.');
     });
     child.on('close', (code) => {
       clearTimeout(timer);

@@ -2,7 +2,9 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import path from 'node:path';
 import { writeFile, mkdir } from 'node:fs/promises';
-import { configPath, loadCloudSetup } from '../src/config/user.js';
+import { Secret } from '../src/credentials/secret.js';
+import { resolveCredential } from '../src/credentials/resolve.js';
+import { configPath, loadCloudSetup, resolveCloudEmail } from '../src/config/user.js';
 import { observePullRequests } from '../src/providers/bitbucket-cloud.js';
 import type { HttpTransport } from '../src/providers/bitbucket-cloud.js';
 import { checkPullRequests, prCheckSucceeded } from '../src/core/pr.js';
@@ -12,6 +14,7 @@ import { stripVTControlCharacters } from 'node:util';
 import { repository, temp, fixtureGit, directoryAlias, snapshot } from './helpers.js';
 
 const setup = { mapping: {workspace:'team',repository:'repo'}, email:'account@example.invalid', token:'private-token-value' };
+const credentials = { ...setup, token: new Secret(setup.token) };
 const endpoint='https://api.bitbucket.org/2.0/repositories/team/repo/pullrequests';
 const side=(branch:string,repository='team/repo')=>({branch:{name:branch},repository:{full_name:repository},commit:{hash:'a'.repeat(40)}});
 const pr=(id=1)=>({id,title:'Example',state:'OPEN',links:{html:{href:`https://bitbucket.org/team/repo/pull-requests/${id}`}},source:side('topic'),destination:side('main')});
@@ -25,8 +28,10 @@ test('user configuration is explicit, canonical, bounded and secret-safe',async 
   const data={version:1,bitbucketCloud:{emailEnv:'EMAIL',tokenEnv:'TOKEN'},repositories:[mapping]};
   assert.equal(await loadCloudSetup(root,env),undefined);
   await writeFile(config,JSON.stringify(data));
-  assert.deepEqual(await loadCloudSetup(root,env),setup);
-  await assert.rejects(loadCloudSetup(root,{TWIGLET_CONFIG:config}),/Missing credentials/);
+  const loaded = (await loadCloudSetup(root,env))!;
+  assert.equal(resolveCloudEmail(loaded,env),setup.email);
+  assert((await resolveCredential(loaded.tokenRef,{env})).reveal() === setup.token, 'Resolved intended credential');
+  await assert.rejects(resolveCredential(loaded.tokenRef,{env:{}}),/missing/);
   await writeFile(config,JSON.stringify({...data,repositories:[mapping,{...mapping,path:root}]}));
   await assert.rejects(loadCloudSetup(root,env),/Duplicate/);
   await writeFile(config,JSON.stringify({...data,bitbucketCloud:{token:setup.token}}));
@@ -46,7 +51,7 @@ test('Cloud matching uses exact branch and repository, all states and complete p
   const transport:HttpTransport=async(input,options)=>{
     const url=new URL(String(input)); calls++;
     assert.equal(options?.method,'GET'); assert.equal(options?.redirect,'error');
-    assert.equal((options?.headers as Record<string,string>).Authorization,`Basic ${Buffer.from(`${setup.email}:${setup.token}`).toString('base64')}`);
+    assert((options?.headers as Record<string,string>).Authorization === `Basic ${Buffer.from(`${setup.email}:${setup.token}`).toString('base64')}`, 'Intended authorization only');
     if(calls===1){
       assert.equal(url.searchParams.get('q'),'source.branch.name = "topic"');
       assert.deepEqual(url.searchParams.getAll('state'),['OPEN','MERGED','DECLINED','SUPERSEDED']);
@@ -54,15 +59,15 @@ test('Cloud matching uses exact branch and repository, all states and complete p
     }
     return response([{...pr(2),state:'MERGED',destination:{...side('main'),commit:null}}]);
   };
-  const result=await observePullRequests(setup,'topic',undefined,transport);
+  const result=await observePullRequests(credentials,'topic',undefined,transport);
   assert.equal(calls,2); assert.equal(result.complete,true); assert.equal(result.prs.length,2);
   assert.equal(result.prs[1]?.destination.tip,null); assert(Number.isFinite(Date.parse(result.observedAt)));
   const branch='feature/"quoted"';
-  await observePullRequests(setup,branch,undefined,async input=>{
+  await observePullRequests(credentials,branch,undefined,async input=>{
     assert.equal(new URL(String(input)).searchParams.get('q'),`source.branch.name = ${JSON.stringify(branch)}`);
     return response([]);
   });
-  const empty=await observePullRequests(setup,'topic',undefined,async()=>response([]));
+  const empty=await observePullRequests(credentials,'topic',undefined,async()=>response([]));
   assert.equal(empty.complete,true); assert.equal(empty.prs.length,0);
   const view={kind:'observed' as const,root:'/repo',branch:'topic',headOid:'a'.repeat(40),repository:'team/repo',observation:empty};
   assert(prCheckSucceeded(view)); assert.match(renderPrCheck(view),/No matching PR/);
@@ -72,7 +77,7 @@ test('Cloud PR tips preserve live-response abbreviations without resolving them'
   // Live Cloud PR responses embed commit objects with type "commit" and 12 hex digits.
   // Synthetic IDs retain that shape without storing live repository data.
   let calls=0;
-  const result=await observePullRequests(setup,'topic',undefined,async()=>{
+  const result=await observePullRequests(credentials,'topic',undefined,async()=>{
     calls++;
     return response([{...pr(),
       source:{...side('topic'),commit:{type:'commit',hash:'012345abcdef'}},
@@ -88,38 +93,38 @@ test('Cloud PR tips preserve live-response abbreviations without resolving them'
   assert.equal(stripVTControlCharacters(renderPr(observed,createStyle(true))),output);
   for(const length of [40,64]) {
     const hash='a'.repeat(length);
-    const full=await observePullRequests(setup,'topic',undefined,async()=>response([{...pr(),source:{...side('topic'),commit:{hash}}}]));
+    const full=await observePullRequests(credentials,'topic',undefined,async()=>response([{...pr(),source:{...side('topic'),commit:{hash}}}]));
     assert.equal(full.prs[0]!.source.tip,hash);
     assert.doesNotMatch(renderPr(full.prs[0]!),/abbreviated/);
   }
   for(const hash of ['g'.repeat(12),'a'.repeat(11),'a'.repeat(13),'a'.repeat(65),'012345abcdef\n']) {
-    await assert.rejects(observePullRequests(setup,'topic',undefined,async()=>response([{...pr(),destination:{...side('main'),commit:{hash}}}])),/commit ID/);
+    await assert.rejects(observePullRequests(credentials,'topic',undefined,async()=>response([{...pr(),destination:{...side('main'),commit:{hash}}}])),/commit ID/);
   }
 });
 
 test('HTTP errors, malformed/oversized data and pagination never leak credentials',async()=>{
   for(const status of [401,403,404,429,500]) {
-    await assert.rejects(observePullRequests(setup,'topic',undefined,async()=>new Response(setup.token,{status})),error=>!String(error).includes(setup.token));
+    await assert.rejects(observePullRequests(credentials,'topic',undefined,async()=>new Response(setup.token,{status})),error=>!String(error).includes(setup.token));
   }
-  await assert.rejects(observePullRequests(setup,'topic',undefined,async()=>{throw new Error(setup.token);}),/network request failed/);
-  await assert.rejects(observePullRequests(setup,'topic',undefined,async()=>new Response(setup.token)),/invalid JSON/);
-  await assert.rejects(observePullRequests(setup,'topic',undefined,async()=>new Response(new Uint8Array([255]))),/invalid JSON/);
-  await assert.rejects(observePullRequests(setup,'topic',undefined,async()=>response([{...pr(),source:{...side('topic'),commit:{hash:'bad'}}}])),/commit ID/);
-  await assert.rejects(observePullRequests(setup,'topic',undefined,async()=>new Response('x'.repeat(1024*1024+1))),/1 MiB/);
+  await assert.rejects(observePullRequests(credentials,'topic',undefined,async()=>{throw new Error(setup.token);}),/network request failed/);
+  await assert.rejects(observePullRequests(credentials,'topic',undefined,async()=>new Response(setup.token)),/invalid JSON/);
+  await assert.rejects(observePullRequests(credentials,'topic',undefined,async()=>new Response(new Uint8Array([255]))),/invalid JSON/);
+  await assert.rejects(observePullRequests(credentials,'topic',undefined,async()=>response([{...pr(),source:{...side('topic'),commit:{hash:'bad'}}}])),/commit ID/);
+  await assert.rejects(observePullRequests(credentials,'topic',undefined,async()=>new Response('x'.repeat(1024*1024+1))),/1 MiB/);
   for(const next of ['https://evil.invalid/steal',endpoint.replace('/pullrequests','/src'),endpoint+'#fragment']) {
     let calls=0;
-    await assert.rejects(observePullRequests(setup,'topic',undefined,async()=>{calls++;return response([],next);}),/pagination/);
+    await assert.rejects(observePullRequests(credentials,'topic',undefined,async()=>{calls++;return response([],next);}),/pagination/);
     assert.equal(calls,1);
   }
   let calls=0;
-  const incomplete=await observePullRequests(setup,'topic',undefined,async()=>response([],endpoint+`?page=${++calls+1}`));
+  const incomplete=await observePullRequests(credentials,'topic',undefined,async()=>response([],endpoint+`?page=${++calls+1}`));
   assert.equal(calls,10); assert.equal(incomplete.complete,false);
-  const unknown=await observePullRequests(setup,'topic',undefined,async()=>response([{...pr(),source:{...side('topic'),repository:null}}]));
+  const unknown=await observePullRequests(credentials,'topic',undefined,async()=>response([{...pr(),source:{...side('topic'),repository:null}}]));
   assert.equal(unknown.complete,false);
   let repeatedCalls=0;
-  await assert.rejects(observePullRequests(setup,'topic',undefined,async()=>{repeatedCalls++;return response([],endpoint+'?page=2');}),/repeated pagination/);
+  await assert.rejects(observePullRequests(credentials,'topic',undefined,async()=>{repeatedCalls++;return response([],endpoint+'?page=2');}),/repeated pagination/);
   assert.equal(repeatedCalls,2);
-  const reflected=await observePullRequests(setup,'topic',undefined,async()=>response([{...pr(),title:setup.token}]));
+  const reflected=await observePullRequests(credentials,'topic',undefined,async()=>response([{...pr(),title:setup.token}]));
   assert(!JSON.stringify(reflected).includes(setup.token));
 });
 
@@ -134,6 +139,12 @@ test('PR context preserves repository state, rejects stale association and never
   const result=await checkPullRequests(nested,undefined,env,async()=>response([pr()]));
   assert(prCheckSucceeded(result)); assert.deepEqual(await snapshot(root),before);
   assert.equal(stripVTControlCharacters(renderPrCheck(result,createStyle(true))),renderPrCheck(result));
+  await writeFile(config,JSON.stringify({version:1,bitbucketCloud:{email:setup.email,tokenRef:{source:'env',name:'TOKEN'}},repositories:[{path:root,bitbucketCloud:setup.mapping}]}));
+  const direct=await checkPullRequests(root,undefined,env,async(_input,options)=>{
+    assert((options?.headers as Record<string,string>).Authorization === `Basic ${Buffer.from(`${setup.email}:${setup.token}`).toString('base64')}`, 'Provider receives the configured resolved credential');
+    return response([pr()]);
+  });
+  assert(prCheckSucceeded(direct));
   const changed=await checkPullRequests(root,undefined,env,async()=>{
     fixtureGit(root,'commit','--allow-empty','-m','Advance'); return response([pr()]);
   });
@@ -145,7 +156,7 @@ test('PR context preserves repository state, rejects stale association and never
 });
 
 test('interactive PR selection reuses observations and Check again is explicit',async()=>{
-  const observation=await observePullRequests(setup,'topic',undefined,async()=>response([pr(),pr(2)]));
+  const observation=await observePullRequests(credentials,'topic',undefined,async()=>response([pr(),pr(2)]));
   const result={kind:'observed' as const,root:'/repo',branch:'topic',headOid:'a'.repeat(40),repository:'team/repo',observation};
   const answers=['2','back','refresh','back']; let calls=0; let output='';
   await prSession({write:text=>{output+=text;},choose:async(message,choices)=>{
@@ -153,7 +164,7 @@ test('interactive PR selection reuses observations and Check again is explicit',
   }},async()=>{calls++;return result;});
   assert.equal(calls,2);assert.equal(answers.length,0);assert.match(output,/PR #2/);
   const abort=new AbortController();abort.abort();let sent=false;
-  await assert.rejects(observePullRequests(setup,'topic',abort.signal,async()=>{sent=true;return response([]);}));
+  await assert.rejects(observePullRequests(credentials,'topic',abort.signal,async()=>{sent=true;return response([]);}));
   assert.equal(sent,false);
   await assert.rejects(prSession({write:()=>{},choose:async()=>{throw Object.assign(new Error('Cancelled'),{name:'ExitPromptError'});}},async()=>result),/Cancelled/);
 });

@@ -1,4 +1,6 @@
 import { checkPullRequests, prCheckSucceeded } from './core/pr.js';
+import { readDoctor } from './core/doctor.js';
+import { renderDoctor } from './terminal/doctor.js';
 import { renderPrCheck } from './terminal/pr.js';
 import { renderPatch } from './terminal/patch.js';
 import { readOverview } from './core/repository.js';
@@ -22,6 +24,7 @@ Usage: tl [--repo <directory>] [status]
        tl [--repo <directory>] compare <A> <B> [--view commits-a|commits-b|tips|since-base]
        tl [--repo <directory>] compare <A> <B> --view tips|since-base --file <path>
        tl [--repo <directory>] pr --online
+       tl [--repo <directory>] doctor [--check-credentials]
        tl --help
        tl --version
 
@@ -35,13 +38,14 @@ tips compares A tip to B tip; since-base compares their single merge base to B.
 Unavailable upstream comparison does not fail an otherwise useful overview.
 pr --online checks same-repository Bitbucket Cloud PRs using user-local configuration.
 Other inspection commands remain offline.
+doctor checks local setup only; --check-credentials may trigger OS permission prompts.
 Requires Node 22+ and installed Git. No fetch or repository changes.
 `;
 
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
   let directory = process.cwd();
-  let command: 'status' | 'log' | 'branches' | 'branch' | 'compare' | 'pr' | undefined;
+  let command: 'status' | 'log' | 'branches' | 'branch' | 'compare' | 'pr' | 'doctor' | undefined;
   let comparisonNames: [string, string] | undefined;
   let view: ComparisonView | undefined;
   let file: string | undefined;
@@ -50,13 +54,14 @@ async function main(): Promise<void> {
   let information: 'help' | 'version' | undefined;
   let repoSet = false;
   let online = false;
+  let checkCredentials = false;
   for (let i = 0; i < args.length; i++) {
     const arg = args[i]!;
     if (arg === '--repo' && !repoSet) {
       if (!args[i + 1] || args[i + 1]!.startsWith('--')) throw new Error('--repo requires a directory.');
       directory = args[++i]!;
       repoSet = true;
-    } else if ((arg === 'status' || arg === 'log' || arg === 'branches' || arg === 'branch' || arg === 'compare' || arg === 'pr') && !command) {
+    } else if ((arg === 'status' || arg === 'log' || arg === 'branches' || arg === 'branch' || arg === 'compare' || arg === 'pr' || arg === 'doctor') && !command) {
       command = arg;
       if (arg === 'branch') {
         branchName = args[++i];
@@ -70,6 +75,7 @@ async function main(): Promise<void> {
       }
     }
     else if (arg === '--online' && !online) online = true;
+    else if (arg === '--check-credentials' && !checkCredentials) checkCredentials = true;
     else if (arg === '--view' && view === undefined) {
       const value = args[++i];
       if (!value || !['commits-a', 'commits-b', 'tips', 'since-base'].includes(value)) throw new Error('--view requires commits-a, commits-b, tips, or since-base.');
@@ -86,7 +92,7 @@ async function main(): Promise<void> {
     }
     else if (arg === '--help' || arg === '-h') information = 'help';
     else if (arg === '--version') information = 'version';
-    else throw new Error(`Unknown argument: ${arg}. Use --help for usage.`);
+    else throw new Error('Unknown or repeated argument. Use --help for usage.');
   }
   if (information) { process.stdout.write(information === 'help' ? help : '0.6.0\n'); return; }
   if (limit !== undefined && command !== 'log') throw new Error('--limit is only supported with log.');
@@ -94,6 +100,7 @@ async function main(): Promise<void> {
   if (file !== undefined && (command !== 'compare' || (view !== 'tips' && view !== 'since-base'))) throw new Error('--file requires compare with --view tips or since-base.');
   if (command === 'pr' && !online) throw new Error('pr requires --online to explicitly request a Bitbucket Cloud check.');
   if (online && command !== 'pr') throw new Error('--online is only supported with pr.');
+  if (checkCredentials && command !== 'doctor') throw new Error('--check-credentials is only supported with doctor.');
   const abort = new AbortController();
   const interrupt = () => abort.abort();
   process.on('SIGINT', interrupt);
@@ -111,7 +118,12 @@ async function main(): Promise<void> {
       comparisonPatch: (comparison: Comparison, view: 'tips' | 'since-base', path: Buffer) => readComparisonPatch(comparison, view, path, abort.signal),
       comparisonDetail: (comparison: Comparison, view: ComparisonView) => readComparisonDetail(comparison, view, abort.signal),
     };
-    if (command === 'pr') {
+    if (command === 'doctor') {
+      if (checkCredentials) process.stdout.write('Checking local credential access; an OS permission/unlock prompt may appear. No network requests.\n');
+      const report = await readDoctor(directory, checkCredentials, { signal: abort.signal });
+      process.stdout.write(renderDoctor(report, style));
+      if (!report.ok) process.exitCode = 1;
+    } else if (command === 'pr') {
       const result = await operations.prs();
       process.stdout.write(renderPrCheck(result, style));
       if (!prCheckSucceeded(result)) process.exitCode = 1;
